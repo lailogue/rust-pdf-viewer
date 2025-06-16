@@ -6,11 +6,12 @@ edition = "2021"
 [dependencies]
 pdfium-render = "0.8"
 anyhow = "1.0"
-eframe = "0.28"
-egui = "0.28"
-egui_extras = "0.28"
 image = "0.25"
 reqwest = { version = "0.12", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
+dioxus = "0.5"
+dioxus-desktop = "0.5"
+base64 = "0.22"
+futures = "0.3"

@@ -1,107 +1,123 @@
 # PDF Reader
 
-A PDF viewer application built with Rust, egui, and the pdfium library, featuring AI-powered search capabilities using Gemini.
+A modern PDF viewer application built with Rust and Dioxus, featuring AI-powered search capabilities using Gemini.
 
 ## Key Features
 
-- **PDF Loading**: Load and display PDF documents from file paths
-- **Page Navigation**: Navigate PDF pages with previous/next buttons
-- **PDF Rendering**: High-quality real-time rendering of PDF pages as images
-- **Caching**: Intelligent caching of page textures for improved performance
-- **Error Handling**: Comprehensive error reporting for PDF loading and rendering issues
-- **Japanese Font Support**: Japanese text display using macOS system fonts
-- **AI Search**: AI-powered search functionality using Gemini 2.5 Flash API
-- **Cross-platform GUI**: Consistent cross-platform experience with egui
+- **High-Quality PDF Display**: Renders PDF pages at 1000x1400 resolution for balanced quality and performance
+- **Continuous Scroll**: View all PDF pages in a seamless continuous scroll interface
+- **AI-Powered Search**: Integrated Gemini 2.5 Flash API for intelligent content search
+- **Modern UI**: Clean, responsive interface built with Dioxus framework
+- **Optimized Layout**: Specially designed for vertical PDF documents with horizontal AI search panel
+- **Page Caching**: Intelligent caching system for improved performance
+- **Cross-platform**: Desktop application with native performance
 
 ## Technology Stack
 
-- `pdfium-render` - PDF rendering using Google's PDFium library
-- `eframe/egui` - Modern immediate mode GUI framework
-- `anyhow` - Error handling
-- `reqwest` - HTTP client (for AI search)
-- `tokio` - Async runtime
-- `serde` - JSON serialization
+- **Dioxus** - Modern reactive UI framework for Rust
+- **pdfium-render** - PDF rendering using Google's PDFium library
+- **Reqwest** - HTTP client for AI search functionality
+- **Tokio** - Async runtime for non-blocking operations
+- **Serde** - JSON serialization for API communication
+- **Base64** - Image encoding for web display
 
 ## Prerequisites
 
 ### macOS
-
-The application requires PDFium native libraries. The required library for macOS (`libpdfium.dylib`) is included in the project.
+The application requires PDFium native libraries. The required library for macOS (`libpdfium.dylib`) is included in the `lib/` directory.
 
 ### Gemini API Key
-
-To use the AI search functionality, you need to obtain a Gemini API key from Google AI Studio:
+To use the AI search functionality, obtain a Gemini API key from Google AI Studio:
 https://makersuite.google.com/app/apikey
 
-## Usage
+## Installation & Usage
 
+### Building from Source
 ```bash
+# Clone the repository
+git clone <repository-url>
+cd claude_code
+
 # Build the project
-cargo build
+cargo build --release
 
 # Run with a PDF file
-DYLD_LIBRARY_PATH=./lib:$DYLD_LIBRARY_PATH ./target/debug/pdf_reader <PDF_FILE_PATH>
+cargo run -- <PDF_FILE_PATH>
 
 # Example
-DYLD_LIBRARY_PATH=./lib:$DYLD_LIBRARY_PATH ./target/debug/pdf_reader test.pdf
+cargo run -- test.pdf
 ```
 
-### Using AI Search
+### Using the Application
 
-1. After launching the application, enter your Gemini API key in the "API Key" field in the left panel
-2. Enter your search query in the "Search Query" field
-3. Click the "Search" button
-4. Search results will be displayed in the bottom section
+1. **Launch the application** with a PDF file as argument
+2. **Navigate pages** using the Previous/Next buttons at the top
+3. **AI Search**:
+   - Enter your Gemini API key in the right panel
+   - Type your search query
+   - Click "検索" (Search) to get AI-powered explanations
+4. **View results** in the expandable search results area
 
-## Implementation Details
+## Application Layout
 
-### Core Components
+- **Left Panel**: PDF display area optimized for vertical documents
+- **Right Panel**: AI search interface
+  - API key input (password field)
+  - Search query input
+  - Search button with loading indicator
+  - Expandable results area with clean text formatting
+- **Top Bar**: Page navigation controls and PDF information
 
-- **PdfViewerApp**: Main application struct containing PDF state and UI logic
-- **render_page()**: Renders PDF pages to textures with configurable scaling
-- **Page Cache**: HashMap-based caching system for rendered page textures
-- **Error Handling**: Graceful fallbacks when rendering fails
-- **Japanese Font Support**: Automatic loading of macOS system fonts (Hiragino Kaku Gothic, Noto Sans CJK, etc.)
-- **AI Search**: Asynchronous search functionality using Gemini 2.5 Flash API
+## Implementation Highlights
 
-### PDF Rendering Pipeline
+### High-Quality Rendering
+- PDF pages rendered at 1000x1400 pixels for balanced quality and performance
+- Continuous scroll display for all pages at once
+- Automatic color space conversion (BGRA → RGBA)
+- PNG encoding with base64 data URLs for web display
 
-1. Load PDF document using pdfium-render
-2. Extract page information (count, metadata)
-3. Render individual pages to bitmaps on demand
-4. Convert bitmaps to egui textures with RGBA format conversion
-5. Cache textures for performance optimization
-6. Display with automatic scaling to fit available screen space
+### AI Search Integration
+- Asynchronous Gemini API calls that don't block the UI
+- Markdown formatting removal for clean text display
+- Real-time search status indicators
+- Comprehensive error handling
 
-### UI Features
+### Performance Optimizations
+- Page-level caching system using HashMap
+- Lazy loading of PDF pages
+- Memory-efficient image handling
+- Responsive UI updates
 
-- Page counter display
-- Previous/next navigation buttons
-- PDF file information display
-- Error message display for loading/rendering failures
-- Responsive layout with scroll support
-- AI search panel (API key input, search query input, result display)
-- Proper Japanese text rendering
+### Modern Dioxus Architecture
+- Reactive state management with `use_signal`
+- Memoized computations with `use_memo`
+- Component-based design patterns
+- CSS-in-Rust styling approach
 
-### AI Search System
+## Project Structure
 
-- **Asynchronous Processing**: Non-blocking async API calls that don't freeze the UI
-- **Gemini 2.5 Flash**: Uses the latest Gemini model
-- **Error Handling**: Proper handling and display of API errors
-- **Real-time Updates**: Real-time display of search results
+```
+├── src/
+│   └── main.rs           # Main Dioxus application
+├── assets/
+│   └── style.css         # UI styling
+├── lib/
+│   └── libpdfium.dylib   # PDFium library for macOS
+├── Cargo.toml            # Dependencies and configuration
+└── README.md            # This file
+```
 
-## Architecture
+## Development
 
-The application follows clear separation of concerns:
-- PDF loading and document management
-- Page rendering and image conversion
-- UI state management and display
-- Error handling and user feedback
-- AI search functionality and API communication
-- Japanese font support
+### Code Organization
+- **PDF Rendering**: `render_pdf_page()` function handles high-resolution page rendering
+- **AI Search**: `search_with_gemini()` async function for API integration
+- **Text Processing**: `clean_markdown_text()` for formatting search results
+- **UI Components**: Reactive Dioxus components with modern state management
 
-Built with modern Rust patterns including Result-type error handling and Option-type state management.
+### Dependencies
+All dependencies are optimized for the Dioxus ecosystem, removing legacy egui dependencies for a cleaner, more maintainable codebase.
 
 ## License
 
-This project is licensed under the license file included in the project.
+This project is licensed under the terms specified in the LICENSE file.
