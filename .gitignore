@@ -10,6 +10,9 @@ VERSION
 args.gn
 pdfium-mac.tgz
 
+# PDF files
+*.pdf
+
 # OS generated files
 .DS_Store
 .DS_Store?
