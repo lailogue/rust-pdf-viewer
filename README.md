@@ -1,74 +1,107 @@
-# PDF Reader
+# PDF リーダー
 
-A Rust-based PDF viewer application built with egui and pdfium-render.
+RustとeguiとpdfiumライブラリによるPDF閲覧アプリケーション。Gemini AIによる検索機能付き。
 
-## Features
+## 主な機能
 
-- **PDF Loading**: Load and display PDF documents from file paths
-- **Page Navigation**: Navigate through PDF pages with Previous/Next buttons
-- **PDF Rendering**: Real-time rendering of PDF pages as images with proper scaling
-- **Caching**: Intelligent page caching for improved performance
-- **Error Handling**: Comprehensive error reporting for PDF loading and rendering issues
-- **Cross-platform GUI**: Built with egui for consistent cross-platform experience
+- **PDF読み込み**: ファイルパスからPDFドキュメントを読み込み・表示
+- **ページナビゲーション**: 前へ/次へボタンでPDFページを移動
+- **PDF レンダリング**: PDFページをリアルタイムで画像として高品質レンダリング
+- **キャッシュ機能**: ページテクスチャを智能的にキャッシュしてパフォーマンスを向上
+- **エラーハンドリング**: PDF読み込み・レンダリング問題の包括的エラー報告
+- **日本語フォント対応**: macOSシステムフォントによる日本語テキスト表示
+- **AI検索機能**: Gemini 2.5 Flash APIによるAI powered検索
+- **クロスプラットフォームGUI**: eguiによる一貫したクロスプラットフォーム体験
 
-## Dependencies
+## 技術スタック
 
-- `pdfium-render` - PDF rendering capabilities using Google's PDFium library
-- `eframe/egui` - Modern immediate mode GUI framework
-- `anyhow` - Error handling
-- `image` - Image processing support
+- `pdfium-render` - Google PDFiumライブラリによるPDFレンダリング
+- `eframe/egui` - モダンな即座モードGUIフレームワーク
+- `anyhow` - エラーハンドリング
+- `reqwest` - HTTP クライアント（AI検索用）
+- `tokio` - 非同期ランタイム
+- `serde` - JSON シリアライゼーション
 
-## Prerequisites
+## 前提条件
 
 ### macOS
 
-The application requires the PDFium native library. For macOS, the required library (`libpdfium.dylib`) is included in the project.
+アプリケーションにはPDFiumネイティブライブラリが必要です。macOS用の必要なライブラリ（`libpdfium.dylib`）はプロジェクトに含まれています。
 
-## Usage
+### Gemini API キー
+
+AI検索機能を利用するには、Google AI Studio から Gemini API キーを取得する必要があります。
+https://makersuite.google.com/app/apikey
+
+## 使用方法
 
 ```bash
-# Build the project
+# プロジェクトをビルド
 cargo build
 
-# Run with a PDF file
-DYLD_LIBRARY_PATH=./lib:$DYLD_LIBRARY_PATH ./target/debug/pdf_reader <path_to_pdf_file>
+# PDFファイルを指定して実行
+DYLD_LIBRARY_PATH=./lib:$DYLD_LIBRARY_PATH ./target/debug/pdf_reader <PDFファイルパス>
 
-# Example
+# 例
 DYLD_LIBRARY_PATH=./lib:$DYLD_LIBRARY_PATH ./target/debug/pdf_reader test.pdf
 ```
 
-## Implementation Details
+### AI検索機能の使用
 
-### Core Components
+1. アプリケーション起動後、左側パネルの「APIキー」欄にGemini APIキーを入力
+2. 「検索語句」欄に検索したい内容を入力
+3. 「検索」ボタンをクリック
+4. 検索結果が下部に表示されます
 
-- **PdfViewerApp**: Main application struct containing PDF state and UI logic
-- **render_page()**: Renders PDF pages to textures with configurable scaling
-- **Page Caching**: HashMap-based caching system for rendered page textures
-- **Error Handling**: Graceful fallback for rendering failures
+## 実装詳細
 
-### PDF Rendering Pipeline
+### コアコンポーネント
 
-1. Load PDF document using pdfium-render
-2. Extract page information (count, metadata)
-3. Render individual pages to bitmaps on demand
-4. Convert bitmaps to egui textures with RGBA format conversion
-5. Cache textures for performance optimization
-6. Display with automatic scaling to fit available screen space
+- **PdfViewerApp**: PDF状態とUI ロジックを含むメインアプリケーション構造体
+- **render_page()**: 設定可能なスケーリングでPDFページをテクスチャにレンダリング
+- **ページキャッシュ**: レンダリング済みページテクスチャのHashMapベースキャッシュシステム
+- **エラーハンドリング**: レンダリング失敗時の優雅なフォールバック
+- **日本語フォント対応**: macOSシステムフォント（ヒラギノ角ゴシック、Noto Sans CJK等）の自動読み込み
+- **AI検索**: Gemini 2.5 Flash APIを使った非同期検索機能
 
-### UI Features
+### PDFレンダリングパイプライン
 
-- Page counter display
-- Previous/Next navigation buttons
-- PDF file information display
-- Error message display for loading/rendering failures
-- Responsive layout with scroll support
+1. pdfium-renderを使用してPDFドキュメントを読み込み
+2. ページ情報（カウント、メタデータ）を抽出
+3. 個別ページをオンデマンドでビットマップにレンダリング
+4. RGBA形式変換でビットマップをeguiテクスチャに変換
+5. パフォーマンス最適化のためテクスチャをキャッシュ
+6. 利用可能な画面スペースに合わせて自動スケーリングで表示
 
-## Architecture
+### UI機能
 
-The application follows a clean separation of concerns:
-- PDF loading and document management
-- Page rendering and image conversion
-- UI state management and display
-- Error handling and user feedback
+- ページカウンター表示
+- 前へ/次へナビゲーションボタン
+- PDFファイル情報表示
+- 読み込み/レンダリング失敗時のエラーメッセージ表示
+- スクロール対応のレスポンシブレイアウト
+- AI検索パネル（APIキー入力、検索語句入力、結果表示）
+- 日本語テキストの正しい表示
 
-Built with modern Rust patterns including Result types for error handling and Option types for state management.
+### AI検索システム
+
+- **非同期処理**: UIをブロックしない非同期API呼び出し
+- **Gemini 2.5 Flash**: 最新のGeminiモデルを使用
+- **エラーハンドリング**: API エラーの適切な処理と表示
+- **リアルタイム更新**: 検索結果のリアルタイム表示
+
+## アーキテクチャ
+
+アプリケーションは明確な関心事の分離に従います：
+- PDF読み込みとドキュメント管理
+- ページレンダリングと画像変換
+- UI状態管理と表示
+- エラーハンドリングとユーザーフィードバック
+- AI検索機能とAPI通信
+- 日本語フォントサポート
+
+Result型によるエラーハンドリングとOption型による状態管理を含む、モダンなRustパターンで構築されています。
+
+## ライセンス
+
+このプロジェクトは含まれているライセンスファイルの下でライセンスされています。
