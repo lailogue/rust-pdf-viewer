@@ -1,7 +1,8 @@
-use anyhow::{Context, Result};
-use pdf::file::File as PdfFile;
-use pdf::object::*;
+use anyhow::Result;
+use eframe::egui;
 use std::env;
+use std::path::PathBuf;
+use pdfium_render::prelude::*;
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -10,132 +11,211 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    let pdf_path = &args[1];
-    read_pdf(pdf_path)?;
-    Ok(())
+    let pdf_path = PathBuf::from(&args[1]);
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default().with_inner_size([1024.0, 768.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "PDF Viewer",
+        options,
+        Box::new(|_cc| Ok(Box::new(PdfViewerApp::new(pdf_path)))),
+    ).map_err(|e| anyhow::anyhow!("Failed to run GUI: {}", e))
 }
 
-fn read_pdf(path: &str) -> Result<()> {
-    let file = PdfFile::open(path)
-        .with_context(|| format!("Failed to open PDF file: {}", path))?;
-
-    println!("PDF Information:");
-    println!("Pages: {}", file.num_pages());
-    
-    if let Ok(info) = file.trailer.info_dict {
-        if let Some(title) = info.title {
-            println!("Title: {}", title.to_string_lossy());
-        }
-        if let Some(author) = info.author {
-            println!("Author: {}", author.to_string_lossy());
-        }
-        if let Some(subject) = info.subject {
-            println!("Subject: {}", subject.to_string_lossy());
-        }
-    }
-
-    println!("\nPage Contents:");
-    for page_num in 1..=file.num_pages() {
-        println!("\n--- Page {} ---", page_num);
-        match extract_page_text(&file, page_num) {
-            Ok(text) => {
-                if text.trim().is_empty() {
-                    println!("(No text content found)");
-                } else {
-                    println!("{}", text);
-                }
-            }
-            Err(e) => println!("Error reading page {}: {}", page_num, e),
-        }
-    }
-
-    Ok(())
+struct PdfViewerApp {
+    pdf_path: PathBuf,
+    pdfium: Option<Pdfium>,
+    current_page: usize,
+    total_pages: usize,
+    pdf_info: String,
+    error_message: Option<String>,
+    page_textures: std::collections::HashMap<usize, egui::TextureHandle>,
 }
 
-fn extract_page_text(file: &PdfFile, page_num: u32) -> Result<String> {
-    let page = file.get_page(page_num)
-        .with_context(|| format!("Failed to get page {}", page_num))?;
-    
-    let mut text = String::new();
-    
-    if let Some(contents) = &page.contents {
-        for content in contents {
-            if let Ok(content_stream) = file.get_object(content.get_inner()) {
-                if let Object::Stream(stream) = content_stream {
-                    if let Ok(data) = stream.data() {
-                        let content_str = String::from_utf8_lossy(&data);
-                        text.push_str(&extract_text_from_stream(&content_str));
+impl PdfViewerApp {
+    fn render_page(&mut self, page_index: usize, ctx: &egui::Context) -> Option<&egui::TextureHandle> {
+        if self.page_textures.contains_key(&page_index) {
+            return self.page_textures.get(&page_index);
+        }
+
+        if let Some(pdfium) = &self.pdfium {
+            if let Ok(document) = pdfium.load_pdf_from_file(&self.pdf_path, None) {
+                if let Ok(page) = document.pages().get(page_index as u16) {
+                let render_config = PdfRenderConfig::new()
+                    .set_target_width(800)
+                    .set_maximum_height(1200)
+                    .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+
+                match page.render_with_config(&render_config) {
+                    Ok(bitmap) => {
+                        let width = bitmap.width() as usize;
+                        let height = bitmap.height() as usize;
+                        
+                        let image_buffer = bitmap.as_raw_bytes();
+                        let mut rgba_pixels = Vec::with_capacity(width * height * 4);
+                        
+                        for chunk in image_buffer.chunks(4) {
+                            if chunk.len() >= 4 {
+                                rgba_pixels.push(chunk[2]); // R
+                                rgba_pixels.push(chunk[1]); // G  
+                                rgba_pixels.push(chunk[0]); // B
+                                rgba_pixels.push(chunk[3]); // A
+                            }
+                        }
+
+                        let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                            [width, height],
+                            &rgba_pixels,
+                        );
+                        
+                        let texture_handle = ctx.load_texture(
+                            format!("pdf_page_{}", page_index),
+                            color_image,
+                            egui::TextureOptions::default(),
+                        );
+                        
+                        self.page_textures.insert(page_index, texture_handle);
+                        return self.page_textures.get(&page_index);
+                    }
+                    Err(e) => {
+                        self.error_message = Some(format!("Failed to render page {}: {}", page_index + 1, e));
                     }
                 }
             }
         }
+        }
+        None
     }
-    
-    Ok(text)
-}
+    fn new(pdf_path: PathBuf) -> Self {
+        let mut app = Self {
+            pdf_path,
+            pdfium: None,
+            current_page: 0,
+            total_pages: 0,
+            pdf_info: String::new(),
+            error_message: None,
+            page_textures: std::collections::HashMap::new(),
+        };
+        app.load_pdf();
+        app
+    }
 
-fn extract_text_from_stream(stream_content: &str) -> String {
-    let mut text = String::new();
-    let mut in_text_object = false;
-    
-    for line in stream_content.lines() {
-        let line = line.trim();
-        
-        if line == "BT" {
-            in_text_object = true;
-            continue;
-        }
-        
-        if line == "ET" {
-            in_text_object = false;
-            continue;
-        }
-        
-        if in_text_object && line.contains("Tj") {
-            if let Some(start) = line.find('(') {
-                if let Some(end) = line.rfind(')') {
-                    if start < end {
-                        let extracted = &line[start + 1..end];
-                        text.push_str(extracted);
-                        text.push(' ');
+    fn load_pdf(&mut self) {
+        match Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name()) {
+            Ok(bindings) => {
+                let pdfium = Pdfium::new(bindings);
+                match pdfium.load_pdf_from_file(&self.pdf_path, None) {
+                    Ok(document) => {
+                        let page_count = document.pages().len() as usize;
+                        self.total_pages = page_count;
+                        
+                        let mut info = format!("Pages: {}\n", page_count);
+                        info.push_str("File: ");
+                        info.push_str(self.pdf_path.file_name().unwrap_or_default().to_string_lossy().as_ref());
+                        info.push_str("\n(PDF successfully loaded with pdfium-render)");
+                        
+                        self.pdf_info = info;
+                        self.error_message = None;
                     }
-                }
+                    Err(e) => {
+                        self.error_message = Some(format!("Failed to load PDF: {}", e));
+                        return;
+                    }
+                };
+                self.pdfium = Some(pdfium);
+            }
+            Err(e) => {
+                self.error_message = Some(format!("Failed to initialize Pdfium: {}", e));
             }
         }
-        
-        if in_text_object && line.contains("TJ") {
-            text.push_str(&extract_from_array(line));
+    }
+
+    fn get_pdf_info(&self) -> &str {
+        if self.pdf_info.is_empty() {
+            "No PDF loaded"
+        } else {
+            &self.pdf_info
         }
     }
-    
-    text
 }
 
-fn extract_from_array(line: &str) -> String {
-    let mut text = String::new();
-    let mut in_string = false;
-    let mut current_string = String::new();
-    
-    for ch in line.chars() {
-        match ch {
-            '(' => {
-                in_string = true;
-                current_string.clear();
+impl eframe::App for PdfViewerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("PDF Viewer");
+
+            if let Some(ref error) = self.error_message {
+                ui.colored_label(egui::Color32::RED, error);
+                return;
             }
-            ')' => {
-                if in_string {
-                    text.push_str(&current_string);
-                    text.push(' ');
-                    in_string = false;
+
+            if self.pdfium.is_none() {
+                ui.label("Loading PDF...");
+                return;
+            }
+
+            ui.horizontal(|ui| {
+                if ui.button("Previous").clicked() && self.current_page > 0 {
+                    self.current_page -= 1;
                 }
-            }
-            _ => {
-                if in_string {
-                    current_string.push(ch);
+                
+                ui.label(format!("Page {} of {}", self.current_page + 1, self.total_pages));
+                
+                if ui.button("Next").clicked() && self.current_page < self.total_pages.saturating_sub(1) {
+                    self.current_page += 1;
                 }
-            }
-        }
+            });
+
+            ui.separator();
+
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.group(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label("PDF Information:");
+                        ui.label(self.get_pdf_info());
+                        
+                        ui.separator();
+                        
+                        ui.label(format!("Currently viewing page: {}", self.current_page + 1));
+                        
+                        // 実際のPDFページをレンダリングして表示
+                        if let Some(texture) = self.render_page(self.current_page, ctx) {
+                            let image_size = texture.size_vec2();
+                            let available_size = ui.available_size();
+                            
+                            // 利用可能なサイズに合わせてスケールを計算
+                            let scale_x = available_size.x / image_size.x;
+                            let scale_y = available_size.y / image_size.y;
+                            let scale = scale_x.min(scale_y).min(1.0); // 最大でも1.0倍まで
+                            
+                            let display_size = image_size * scale;
+                            
+                            ui.image((texture.id(), display_size));
+                        } else {
+                            // フォールバック: レンダリングできない場合はプレースホルダーを表示
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::Vec2::new(600.0, 800.0),
+                                egui::Sense::hover()
+                            );
+                            ui.painter().rect_stroke(
+                                rect,
+                                egui::Rounding::same(5.0),
+                                egui::Stroke::new(2.0, egui::Color32::GRAY)
+                            );
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                format!("Page {} Content\n(Rendering failed or loading...)", self.current_page + 1),
+                                egui::FontId::default(),
+                                egui::Color32::GRAY
+                            );
+                        }
+                    });
+                });
+            });
+        });
     }
-    
-    text
+
 }

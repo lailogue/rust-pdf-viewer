@@ -4,5 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-pdf = "0.8"
+pdfium-render = "0.8"
 anyhow = "1.0"
+eframe = "0.28"
+egui = "0.28"
+egui_extras = "0.28"
+image = "0.25"
