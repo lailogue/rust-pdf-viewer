@@ -1,1 +1,20 @@
 target/
+
+# PDFium library files
+lib/
+include/
+licenses/
+LICENSE
+PDFiumConfig.cmake
+VERSION
+args.gn
+pdfium-mac.tgz
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
