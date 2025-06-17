@@ -13,6 +13,9 @@ pdfium-mac.tgz
 # PDF files
 *.pdf
 
+# Icon generation files
+*.iconset/
+
 # OS generated files
 .DS_Store
 .DS_Store?
