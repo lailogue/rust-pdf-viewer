@@ -8,6 +8,7 @@ A modern PDF viewer application built with Rust and Dioxus, featuring AI-powered
 - **High-Quality PDF Display**: Renders PDF pages at 1000x1400 resolution for balanced quality and performance
 - **Continuous Scroll**: View all PDF pages in a seamless continuous scroll interface
 - **AI-Powered Search**: Integrated Gemini 2.5 Flash API for intelligent content analysis and term explanations
+- **Flashcard System**: Automatic vocabulary flashcard creation from search terms with persistent storage and popup interface
 - **Modern UI**: Clean, responsive interface built with Dioxus framework
 - **Optimized Layout**: Specially designed for vertical PDF documents with horizontal AI search panel
 - **Smart Caching**: Intelligent page caching system with optimized loading to prevent unnecessary re-rendering
@@ -152,6 +153,36 @@ cargo run
     - Search button with loading indicator
     - Results area with clean text formatting
 - **Welcome Screen**: Displayed when no PDF is loaded with usage instructions
+
+## Data Storage
+
+### Flashcard Data
+The application automatically saves search terms and their AI-generated definitions as flashcards for future reference.
+
+**Storage Location:**
+- **macOS**: `~/.config/pdf-viewer/flashcards.json`
+- **Linux**: `~/.config/pdf-viewer/flashcards.json`  
+- **Windows**: `%USERPROFILE%\.config\pdf-viewer\flashcards.json`
+
+**Data Format:**
+Flashcards are stored in JSON format with the following structure:
+```json
+[
+  {
+    "id": "1734493200000-machine-lea",
+    "term": "machine learning",
+    "definition": "AI-generated explanation of the term...",
+    "created_at": "2024-12-18 12:00:00 UTC"
+  }
+]
+```
+
+**Features:**
+- Automatic saving when AI search is performed
+- Duplicate term detection (updates existing definitions)
+- Persistent storage across application sessions
+- Popup interface for browsing saved flashcards
+- Individual flashcard deletion capability
 
 ## Implementation Highlights
 

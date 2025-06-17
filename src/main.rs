@@ -108,6 +108,12 @@ fn add_flashcard(term: String, definition: String) -> Result<()> {
     save_flashcards(&flashcards)
 }
 
+fn delete_flashcard(card_id: String) -> Result<()> {
+    let mut flashcards = load_flashcards();
+    flashcards.retain(|card| card.id != card_id);
+    save_flashcards(&flashcards)
+}
+
 
 #[derive(Serialize, Deserialize)]
 struct GeminiRequest {
@@ -1144,6 +1150,20 @@ fn App() -> Element {
                             }
                             div { 
                                 style: "display: flex; gap: 10px; align-items: center;",
+                                button { 
+                                    style: "background-color: #e74c3c; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px;",
+                                    onclick: {
+                                        let card_id = card.id.clone();
+                                        move |_| {
+                                            if let Ok(_) = delete_flashcard(card_id.clone()) {
+                                                flashcards.set(load_flashcards());
+                                                show_flashcard_details.set(false);
+                                                selected_flashcard.set(None);
+                                            }
+                                        }
+                                    },
+                                    "🗑️ 削除"
+                                }
                                 button { 
                                     style: "background-color: #3498db; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px;",
                                     onclick: move |_| {
