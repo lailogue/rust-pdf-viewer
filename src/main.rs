@@ -8,6 +8,23 @@ use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use base64::Engine;
 
+#[derive(Clone, PartialEq)]
+enum AIProvider {
+    Gemini,
+    ChatGPT,
+    Claude,
+}
+
+impl AIProvider {
+    fn display_name(&self) -> &str {
+        match self {
+            AIProvider::Gemini => "Gemini 2.5 Flash",
+            AIProvider::ChatGPT => "ChatGPT (GPT-4o)",
+            AIProvider::Claude => "Claude 3.5 Sonnet",
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct GeminiRequest {
     contents: Vec<Content>,
@@ -31,6 +48,55 @@ struct GeminiResponse {
 #[derive(Serialize, Deserialize)]
 struct Candidate {
     content: Content,
+}
+
+// ChatGPT API用の構造体
+#[derive(Serialize, Deserialize)]
+struct ChatGPTRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    max_tokens: u32,
+    temperature: f32,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChatMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChatGPTResponse {
+    choices: Vec<ChatChoice>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ChatChoice {
+    message: ChatMessage,
+}
+
+// Claude API用の構造体
+#[derive(Serialize, Deserialize)]
+struct ClaudeRequest {
+    model: String,
+    max_tokens: u32,
+    messages: Vec<ClaudeMessage>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ClaudeMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ClaudeResponse {
+    content: Vec<ClaudeContent>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ClaudeContent {
+    text: String,
 }
 
 fn clean_markdown_text(text: &str) -> String {
@@ -76,6 +142,76 @@ async fn search_with_gemini(query: String, api_key: String) -> Result<String> {
         }
     } else {
         Err(anyhow::anyhow!("レスポンスに候補が含まれていません"))
+    }
+}
+
+async fn search_with_chatgpt(query: String, api_key: String) -> Result<String> {
+    let client = reqwest::Client::new();
+    let url = "https://api.openai.com/v1/chat/completions";
+
+    let request = ChatGPTRequest {
+        model: "gpt-4o".to_string(),
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: format!("{}とは何ですか。簡潔に説明してください", query),
+        }],
+        max_tokens: 500,
+        temperature: 0.7,
+    };
+
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&request)
+        .send()
+        .await?
+        .json::<ChatGPTResponse>()
+        .await?;
+
+    if let Some(choice) = response.choices.first() {
+        Ok(clean_markdown_text(&choice.message.content))
+    } else {
+        Err(anyhow::anyhow!("レスポンスに候補が含まれていません"))
+    }
+}
+
+async fn search_with_claude(query: String, api_key: String) -> Result<String> {
+    let client = reqwest::Client::new();
+    let url = "https://api.anthropic.com/v1/messages";
+
+    let request = ClaudeRequest {
+        model: "claude-3-5-sonnet-20241022".to_string(),
+        max_tokens: 500,
+        messages: vec![ClaudeMessage {
+            role: "user".to_string(),
+            content: format!("{}とは何ですか。簡潔に説明してください", query),
+        }],
+    };
+
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .json(&request)
+        .send()
+        .await?
+        .json::<ClaudeResponse>()
+        .await?;
+
+    if let Some(content) = response.content.first() {
+        Ok(clean_markdown_text(&content.text))
+    } else {
+        Err(anyhow::anyhow!("レスポンスに候補が含まれていません"))
+    }
+}
+
+async fn search_with_ai(provider: AIProvider, query: String, api_key: String) -> Result<String> {
+    match provider {
+        AIProvider::Gemini => search_with_gemini(query, api_key).await,
+        AIProvider::ChatGPT => search_with_chatgpt(query, api_key).await,
+        AIProvider::Claude => search_with_claude(query, api_key).await,
     }
 }
 
@@ -162,7 +298,10 @@ fn App() -> Element {
         }
     });
     
-    let mut api_key = use_signal(|| String::new());
+    let mut selected_provider = use_signal(|| AIProvider::Gemini);
+    let mut gemini_api_key = use_signal(|| String::new());
+    let mut chatgpt_api_key = use_signal(|| String::new());
+    let mut claude_api_key = use_signal(|| String::new());
     let mut search_query = use_signal(|| String::new());
     let mut search_result = use_signal(|| String::new());
     let mut is_searching = use_signal(|| false);
@@ -392,11 +531,55 @@ fn App() -> Element {
                                 h2 { "AI検索" }
                                 
                                 div { class: "form-group",
-                                    label { "APIキー:" }
+                                    label { "AIモデル:" }
+                                    select {
+                                        value: match selected_provider() {
+                                            AIProvider::Gemini => "gemini",
+                                            AIProvider::ChatGPT => "chatgpt",
+                                            AIProvider::Claude => "claude",
+                                        },
+                                        onchange: move |evt| {
+                                            match evt.value().as_str() {
+                                                "gemini" => selected_provider.set(AIProvider::Gemini),
+                                                "chatgpt" => selected_provider.set(AIProvider::ChatGPT),
+                                                "claude" => selected_provider.set(AIProvider::Claude),
+                                                _ => {}
+                                            }
+                                        },
+                                        style: "width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #bdc3c7; background-color: white; color: black;",
+                                        option { value: "gemini", "Gemini 2.5 Flash" }
+                                        option { value: "chatgpt", "ChatGPT (GPT-4o)" }
+                                        option { value: "claude", "Claude 3.5 Sonnet" }
+                                    }
+                                }
+                                
+                                div { class: "form-group",
+                                    label { 
+                                        match selected_provider() {
+                                            AIProvider::Gemini => "Gemini APIキー:",
+                                            AIProvider::ChatGPT => "ChatGPT APIキー:",
+                                            AIProvider::Claude => "Claude APIキー:",
+                                        }
+                                    }
                                     input {
                                         r#type: "password",
-                                        value: "{api_key}",
-                                        oninput: move |evt| api_key.set(evt.value().clone())
+                                        placeholder: match selected_provider() {
+                                            AIProvider::Gemini => "Gemini APIキーを入力",
+                                            AIProvider::ChatGPT => "OpenAI APIキーを入力",
+                                            AIProvider::Claude => "Anthropic APIキーを入力",
+                                        },
+                                        value: match selected_provider() {
+                                            AIProvider::Gemini => gemini_api_key(),
+                                            AIProvider::ChatGPT => chatgpt_api_key(),
+                                            AIProvider::Claude => claude_api_key(),
+                                        },
+                                        oninput: move |evt| {
+                                            match selected_provider() {
+                                                AIProvider::Gemini => gemini_api_key.set(evt.value().clone()),
+                                                AIProvider::ChatGPT => chatgpt_api_key.set(evt.value().clone()),
+                                                AIProvider::Claude => claude_api_key.set(evt.value().clone()),
+                                            }
+                                        }
                                     }
                                 }
                                 
@@ -404,16 +587,28 @@ fn App() -> Element {
                                     label { "検索語句:" }
                                     input {
                                         r#type: "text",
-                                        value: "{search_query}",
+                                        value: search_query(),
                                         oninput: move |evt| search_query.set(evt.value().clone())
                                     }
                                 }
                                 
                                 div { class: "form-group",
                                     button {
-                                        disabled: api_key().is_empty() || search_query().is_empty() || is_searching(),
+                                        disabled: {
+                                            let api_key_empty = match selected_provider() {
+                                                AIProvider::Gemini => gemini_api_key().is_empty(),
+                                                AIProvider::ChatGPT => chatgpt_api_key().is_empty(),
+                                                AIProvider::Claude => claude_api_key().is_empty(),
+                                            };
+                                            api_key_empty || search_query().is_empty() || is_searching()
+                                        },
                                         onclick: move |_| {
-                                            let api_key_val = api_key();
+                                            let provider = selected_provider();
+                                            let api_key_val = match provider {
+                                                AIProvider::Gemini => gemini_api_key(),
+                                                AIProvider::ChatGPT => chatgpt_api_key(),
+                                                AIProvider::Claude => claude_api_key(),
+                                            };
                                             let query_val = search_query();
                                             
                                             if !api_key_val.is_empty() && !query_val.is_empty() {
@@ -421,7 +616,7 @@ fn App() -> Element {
                                                 search_result.set("検索中...".to_string());
                                                 
                                                 spawn(async move {
-                                                    match search_with_gemini(query_val, api_key_val).await {
+                                                    match search_with_ai(provider, query_val, api_key_val).await {
                                                         Ok(result) => search_result.set(result),
                                                         Err(e) => search_result.set(format!("エラー: {}", e)),
                                                     }
