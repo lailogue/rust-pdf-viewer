@@ -25,8 +25,67 @@ RustとDioxusによるモダンなPDF閲覧アプリケーション。Gemini AI�
 
 ## 前提条件
 
-### macOS
+### Rust と Cargo
+このアプリケーションには Rust と Cargo が必要です。公式ウェブサイトからインストールしてください：
+
+**Windows、macOS、Linux:**
+```bash
+# rustup経由でRustをインストール（推奨）
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Windowsの場合は、以下からrustup-init.exeをダウンロードして実行:
+# https://rustup.rs/
+
+# ターミナルを再起動するか、以下を実行:
+source ~/.cargo/env
+
+# インストールの確認
+cargo --version
+rustc --version
+```
+
+**代替インストール方法:**
+
+**macOS (Homebrew経由):**
+```bash
+brew install rust
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install rustc cargo
+```
+
+**CentOS/RHEL/Fedora:**
+```bash
+# CentOS/RHEL
+sudo yum install rust cargo
+
+# Fedora
+sudo dnf install rust cargo
+```
+
+### PDFium ライブラリ
+
+#### macOS
 アプリケーションにはPDFiumネイティブライブラリが必要です。macOS用の必要なライブラリ（`libpdfium.dylib`）は`lib/`ディレクトリに含まれています。
+
+#### Linux
+Linuxシステムでは、適切なPDFiumライブラリをダウンロードする必要があります：
+```bash
+# x64システム用
+curl -L -o pdfium-linux-x64.tgz \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz" && \
+  tar -xzf pdfium-linux-x64.tgz -C lib --strip-components=1 && \
+  rm pdfium-linux-x64.tgz
+
+# ARM64システム用
+curl -L -o pdfium-linux-arm64.tgz \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-arm64.tgz" && \
+  tar -xzf pdfium-linux-arm64.tgz -C lib --strip-components=1 && \
+  rm pdfium-linux-arm64.tgz
+```
 
 ### Gemini API キー
 AI検索機能を利用するには、Google AI Studio から Gemini API キーを取得してください：

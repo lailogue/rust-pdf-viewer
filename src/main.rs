@@ -38,15 +38,6 @@ struct TextBounds {
     height: f32,
 }
 
-impl AIProvider {
-    fn display_name(&self) -> &str {
-        match self {
-            AIProvider::Gemini => "Gemini 2.5 Flash",
-            AIProvider::ChatGPT => "ChatGPT (GPT-4o)",
-            AIProvider::Claude => "Claude 3.5 Sonnet",
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 struct GeminiRequest {
@@ -499,10 +490,6 @@ fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<Pd
     Some(result)
 }
 
-// Keep the old function for backward compatibility during transition
-fn render_pdf_page_optimized(pdf_path: &PathBuf, page_index: usize) -> Option<String> {
-    render_pdf_page_with_text(pdf_path, page_index).map(|data| data.image_data)
-}
 
 fn get_pdf_info(pdf_path: &PathBuf) -> (usize, String) {
     let lib_path = get_pdfium_library_path();

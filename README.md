@@ -25,8 +25,67 @@ A modern PDF viewer application built with Rust and Dioxus, featuring AI-powered
 
 ## Prerequisites
 
-### macOS
+### Rust and Cargo
+This application requires Rust and Cargo. Install them from the official website:
+
+**Windows, macOS, and Linux:**
+```bash
+# Install Rust via rustup (recommended)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# On Windows, download and run rustup-init.exe from:
+# https://rustup.rs/
+
+# Restart your terminal or run:
+source ~/.cargo/env
+
+# Verify installation
+cargo --version
+rustc --version
+```
+
+**Alternative Installation Methods:**
+
+**macOS (via Homebrew):**
+```bash
+brew install rust
+```
+
+**Ubuntu/Debian:**
+```bash
+sudo apt update
+sudo apt install rustc cargo
+```
+
+**CentOS/RHEL/Fedora:**
+```bash
+# CentOS/RHEL
+sudo yum install rust cargo
+
+# Fedora
+sudo dnf install rust cargo
+```
+
+### PDFium Library
+
+#### macOS
 The application requires PDFium native libraries. The required library for macOS (`libpdfium.dylib`) is included in the `lib/` directory.
+
+#### Linux
+For Linux systems, you'll need to download the appropriate PDFium library:
+```bash
+# For x64 systems
+curl -L -o pdfium-linux-x64.tgz \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz" && \
+  tar -xzf pdfium-linux-x64.tgz -C lib --strip-components=1 && \
+  rm pdfium-linux-x64.tgz
+
+# For ARM64 systems
+curl -L -o pdfium-linux-arm64.tgz \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-arm64.tgz" && \
+  tar -xzf pdfium-linux-arm64.tgz -C lib --strip-components=1 && \
+  rm pdfium-linux-arm64.tgz
+```
 
 ### Gemini API Key
 To use the AI search functionality, obtain a Gemini API key from Google AI Studio:
