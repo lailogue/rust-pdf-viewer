@@ -1078,9 +1078,40 @@ fn App() -> Element {
                         }
                     } else {
                         div { 
-                            class: "flashcards-grid",
-                            style: "display: grid; gap: 12px;",
-                            "単語帳の実装は進行中です..."
+                            class: "flashcards-list",
+                            style: "max-height: 400px; overflow-y: auto;",
+                            for (_index, flashcard) in flashcard_list().iter().enumerate() {
+                                div { 
+                                    key: "{flashcard.id}",
+                                    class: "flashcard-item",
+                                    style: "background-color: #34495e; border-radius: 6px; padding: 16px; margin-bottom: 12px; cursor: pointer; transition: background-color 0.2s; border: 1px solid #445a6f;",
+                                    onclick: {
+                                        let card = flashcard.clone();
+                                        move |_| {
+                                            selected_flashcard.set(Some(card.clone()));
+                                            show_flashcard_details.set(true);
+                                        }
+                                    },
+                                    div { 
+                                        style: "font-weight: bold; margin-bottom: 8px; color: #3498db; font-size: 16px;",
+                                        "{flashcard.term}"
+                                    }
+                                    div { 
+                                        style: "color: #ecf0f1; font-size: 14px; line-height: 1.4; max-height: 60px; overflow: hidden; margin-bottom: 8px;",
+                                        {
+                                            if flashcard.definition.len() > 100 {
+                                                format!("{}...", flashcard.definition.chars().take(100).collect::<String>())
+                                            } else {
+                                                flashcard.definition.clone()
+                                            }
+                                        }
+                                    }
+                                    div { 
+                                        style: "font-size: 12px; color: #95a5a6;",
+                                        "{flashcard.created_at}"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
