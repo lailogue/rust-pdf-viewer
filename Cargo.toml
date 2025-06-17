@@ -6,7 +6,7 @@ edition = "2021"
 [package.metadata.bundle]
 name = "PDF Viewer"
 identifier = "com.rustapp.pdfviewer"
-icon = []
+icon = ["rust_pdf_icon.icns"]
 version = "1.0.0"
 resources = ["lib/libpdfium.dylib"]
 copyright = "Copyright (c) 2024 PDF Viewer"

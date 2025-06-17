@@ -751,12 +751,6 @@ fn App() -> Element {
                         div { 
                             class: "pdf-section",
                             style: "flex: 1; display: flex; flex-direction: column; overflow: hidden; height: 100%;",
-                            div { 
-                                class: "pdf-info",
-                                style: "flex-shrink: 0; margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; border-left: 3px solid #3498db; font-size: 14px;",
-                                h3 { "PDF情報:" }
-                                pre { "{pdf_info}" }
-                            }
                             
                             div { 
                                 class: "pdf-viewer",
