@@ -36,7 +36,24 @@ https://makersuite.google.com/app/apikey
 ```bash
 # リポジトリをクローン
 git clone <repository-url>
-cd claude_code
+cd rust-pdf-viewer
+
+# PDFiumライブラリのセットアップ（macOS）
+mkdir -p lib
+
+# macOS（Apple Silicon）用PDFiumライブラリをダウンロード
+curl -L -o lib/libpdfium.dylib \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz" && \
+  tar -xzf lib/libpdfium.dylib -C lib --strip-components=1 lib/libpdfium.dylib
+
+# Intel Mac用の場合はこちらを使用:
+# curl -L -o pdfium-mac-x64.tgz \
+#   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz" && \
+#   tar -xzf pdfium-mac-x64.tgz -C lib --strip-components=1 lib/libpdfium.dylib && \
+#   rm pdfium-mac-x64.tgz
+
+# ライブラリが正しく配置されているか確認
+ls -la lib/libpdfium.dylib
 
 # プロジェクトをビルド
 cargo build --release
