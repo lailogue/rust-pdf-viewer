@@ -46,6 +46,13 @@ struct FlashCard {
     created_at: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct RecentFile {
+    path: String,
+    display_name: String,
+    last_opened: String,
+}
+
 impl FlashCard {
     fn new(term: String, definition: String) -> Self {
         let id = format!("{}-{}", 
@@ -112,6 +119,67 @@ fn delete_flashcard(card_id: String) -> Result<()> {
     let mut flashcards = load_flashcards();
     flashcards.retain(|card| card.id != card_id);
     save_flashcards(&flashcards)
+}
+
+// 最近開いたファイル管理用のヘルパー関数
+fn load_recent_files() -> Vec<RecentFile> {
+    let path = get_recent_files_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            serde_json::from_str(&content).unwrap_or_else(|_| Vec::new())
+        }
+        Err(_) => Vec::new()
+    }
+}
+
+fn save_recent_files(recent_files: &Vec<RecentFile>) -> Result<()> {
+    let path = get_recent_files_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let content = serde_json::to_string_pretty(recent_files)?;
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+fn get_recent_files_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("pdf-viewer");
+    path.push("recent_files.json");
+    path
+}
+
+fn add_recent_file(file_path: &PathBuf) -> Result<()> {
+    let mut recent_files = load_recent_files();
+    
+    let display_name = file_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    
+    let path_str = file_path.to_string_lossy().to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    
+    // 既存のエントリを削除（重複回避）
+    recent_files.retain(|file| file.path != path_str);
+    
+    // 新しいエントリを先頭に追加
+    recent_files.insert(0, RecentFile {
+        path: path_str,
+        display_name,
+        last_opened: now,
+    });
+    
+    // 最大10件に制限
+    recent_files.truncate(10);
+    
+    save_recent_files(&recent_files)
 }
 
 
@@ -641,8 +709,13 @@ fn App() -> Element {
     let mut show_flashcard_popup = use_signal(|| false);
     let mut show_flashcard_details = use_signal(|| false);
     
+    // 最近開いたファイル関連の状態管理
+    let mut recent_files = use_signal(|| load_recent_files());
+    let mut show_recent_files_popup = use_signal(|| false);
+    
     // 単語帳リストをメモ化
     let flashcard_list = use_memo(move || flashcards());
+    let recent_files_list = use_memo(move || recent_files());
     
     // PDFファイル情報の取得（PDFが選択されている場合のみ）
     let (total_pages, pdf_info) = use_memo(move || {
@@ -744,6 +817,14 @@ fn App() -> Element {
                         class: "file-controls",
                         style: "display: flex; gap: 10px;",
                         button {
+                            class: "recent-files-btn",
+                            style: "padding: 8px 16px; background-color: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer;",
+                            onclick: move |_| {
+                                show_recent_files_popup.set(true);
+                            },
+                            "📋 最近のファイル"
+                        }
+                        button {
                             class: "file-select-btn",
                             style: "padding: 8px 16px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;",
                             onclick: move |_| {
@@ -755,6 +836,8 @@ fn App() -> Element {
                                         .await 
                                     {
                                         let selected_path = file_handle.path().to_path_buf();
+                                        let _ = add_recent_file(&selected_path);
+                                        recent_files.set(load_recent_files());
                                         pdf_path.set(Some(selected_path));
                                         page_cache.write().clear();
                                         loaded_pdf_path.set(None); // 新しいファイル選択時にリセット
@@ -1193,6 +1276,101 @@ fn App() -> Element {
                         div { 
                             style: "border-top: 1px solid #34495e; padding-top: 12px; font-size: 13px; color: #95a5a6;",
                             "保存日時: {card.created_at}"
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 最近開いたファイルのポップアップ
+        if show_recent_files_popup() {
+            div { 
+                class: "popup-overlay",
+                style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;",
+                onclick: move |_| {
+                    show_recent_files_popup.set(false);
+                },
+                div { 
+                    class: "popup-content",
+                    style: "background-color: #2c3e50; border-radius: 8px; padding: 20px; max-width: 600px; max-height: 80vh; overflow-y: auto; position: relative;",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                    },
+                    
+                    // ヘッダー
+                    div { 
+                        style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #34495e; padding-bottom: 10px;",
+                        h2 { 
+                            style: "color: #ecf0f1; margin: 0; font-size: 18px;",
+                            "📋 最近開いたファイル ({recent_files_list().len()}件)"
+                        }
+                        button { 
+                            style: "background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 24px; padding: 0;",
+                            onclick: move |_| {
+                                show_recent_files_popup.set(false);
+                            },
+                            "×"
+                        }
+                    }
+                    
+                    // 最近開いたファイルリスト
+                    if recent_files_list().is_empty() {
+                        div { 
+                            style: "text-align: center; padding: 40px; color: #bdc3c7; font-size: 16px;",
+                            "まだファイルを開いていません。\n\"📁 PDFを開く\"ボタンでファイルを選択してみましょう！"
+                        }
+                    } else {
+                        div { 
+                            class: "recent-files-list",
+                            style: "max-height: 400px; overflow-y: auto;",
+                            for (_index, recent_file) in recent_files_list().iter().enumerate() {
+                                div { 
+                                    key: "{recent_file.path}",
+                                    class: "recent-file-item",
+                                    style: "background-color: #34495e; border-radius: 6px; padding: 16px; margin-bottom: 12px; cursor: pointer; transition: background-color 0.2s; border: 1px solid #445a6f;",
+                                    onclick: {
+                                        let file_path = PathBuf::from(recent_file.path.clone());
+                                        move |_| {
+                                            if file_path.exists() {
+                                                let _ = add_recent_file(&file_path);
+                                                recent_files.set(load_recent_files());
+                                                pdf_path.set(Some(file_path.clone()));
+                                                page_cache.write().clear();
+                                                loaded_pdf_path.set(None);
+                                                is_loading.set(false);
+                                                show_recent_files_popup.set(false);
+                                            }
+                                        }
+                                    },
+                                    div { 
+                                        style: "display: flex; justify-content: space-between; align-items: start;",
+                                        div { 
+                                            style: "flex: 1;",
+                                            div { 
+                                                style: "font-weight: bold; margin-bottom: 4px; color: #3498db; font-size: 16px;",
+                                                "{recent_file.display_name}"
+                                            }
+                                            div { 
+                                                style: "color: #bdc3c7; font-size: 13px; margin-bottom: 4px; word-break: break-all;",
+                                                "{recent_file.path}"
+                                            }
+                                            div { 
+                                                style: "color: #95a5a6; font-size: 12px;",
+                                                "最後に開いた日時: {recent_file.last_opened}"
+                                            }
+                                        }
+                                        div { 
+                                            style: "margin-left: 10px;",
+                                            if !PathBuf::from(&recent_file.path).exists() {
+                                                span { 
+                                                    style: "color: #e74c3c; font-size: 12px;",
+                                                    "❌ ファイルが見つかりません"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
