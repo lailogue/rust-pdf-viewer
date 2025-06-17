@@ -38,6 +38,76 @@ struct TextBounds {
     height: f32,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct FlashCard {
+    id: String,
+    term: String,
+    definition: String,
+    created_at: String,
+}
+
+impl FlashCard {
+    fn new(term: String, definition: String) -> Self {
+        let id = format!("{}-{}", 
+            chrono::Utc::now().timestamp_millis(),
+            term.chars().take(10).collect::<String>().replace(" ", "-")
+        );
+        Self {
+            id,
+            term,
+            definition,
+            created_at: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        }
+    }
+}
+
+// FlashCard管理用のヘルパー関数
+fn load_flashcards() -> Vec<FlashCard> {
+    let path = get_flashcards_file_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            serde_json::from_str(&content).unwrap_or_else(|_| Vec::new())
+        }
+        Err(_) => Vec::new()
+    }
+}
+
+fn save_flashcards(flashcards: &Vec<FlashCard>) -> Result<()> {
+    let path = get_flashcards_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let content = serde_json::to_string_pretty(flashcards)?;
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+fn get_flashcards_file_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("pdf-viewer");
+    path.push("flashcards.json");
+    path
+}
+
+fn add_flashcard(term: String, definition: String) -> Result<()> {
+    let mut flashcards = load_flashcards();
+    
+    // 重複チェック（同じ単語の場合は更新）
+    if let Some(existing) = flashcards.iter_mut().find(|card| card.term == term) {
+        existing.definition = definition;
+        existing.created_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    } else {
+        flashcards.push(FlashCard::new(term, definition));
+    }
+    
+    save_flashcards(&flashcards)
+}
+
 
 #[derive(Serialize, Deserialize)]
 struct GeminiRequest {
@@ -298,11 +368,20 @@ async fn search_with_claude(query: String, api_key: String) -> Result<String> {
 }
 
 async fn search_with_ai(provider: AIProvider, query: String, api_key: String) -> Result<String> {
-    match provider {
-        AIProvider::Gemini => search_with_gemini(query, api_key).await,
-        AIProvider::ChatGPT => search_with_chatgpt(query, api_key).await,
-        AIProvider::Claude => search_with_claude(query, api_key).await,
+    let result = match provider {
+        AIProvider::Gemini => search_with_gemini(query.clone(), api_key).await,
+        AIProvider::ChatGPT => search_with_chatgpt(query.clone(), api_key).await,
+        AIProvider::Claude => search_with_claude(query.clone(), api_key).await,
+    };
+    
+    // 検索が成功した場合、単語帳に保存
+    if let Ok(ref definition) = result {
+        if !query.trim().is_empty() && !definition.trim().is_empty() {
+            let _ = add_flashcard(query.trim().to_string(), definition.clone());
+        }
     }
+    
+    result
 }
 
 fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<PdfPageData> {
@@ -549,6 +628,11 @@ fn App() -> Element {
     let mut is_loading = use_signal(|| false);
     let mut error_message = use_signal(|| String::new());
     let mut loaded_pdf_path = use_signal(|| -> Option<PathBuf> { None }); // 読み込み済みのPDFパスを追跡
+    
+    // 単語帳関連の状態管理
+    let mut flashcards = use_signal(|| load_flashcards());
+    let mut selected_flashcard = use_signal(|| -> Option<FlashCard> { None });
+    let mut show_flashcard_details = use_signal(|| false);
     
     // PDFファイル情報の取得（PDFが選択されている場合のみ）
     let (total_pages, pdf_info) = use_memo(move || {
@@ -900,7 +984,11 @@ fn App() -> Element {
                                                 
                                                 spawn(async move {
                                                     match search_with_ai(provider, query_val, api_key_val).await {
-                                                        Ok(result) => search_result.set(result),
+                                                        Ok(result) => {
+                                                            search_result.set(result);
+                                                            // 単語帳リストを更新
+                                                            flashcards.set(load_flashcards());
+                                                        },
                                                         Err(e) => search_result.set(format!("エラー: {}", e)),
                                                     }
                                                     is_searching.set(false);
@@ -923,6 +1011,88 @@ fn App() -> Element {
                                     class: "result-content",
                                     style: "flex: 1; background-color: #34495e; padding: 12px; border-radius: 4px; overflow-y: auto; font-size: 13px; line-height: 1.4; color: #ecf0f1; white-space: pre-wrap;",
                                     "{search_result}"
+                                }
+                            }
+                            
+                            // 単語帳セクション
+                            div { 
+                                class: "flashcards-section",
+                                style: "flex-shrink: 0; margin-top: 20px; max-height: 300px; display: flex; flex-direction: column;",
+                                h3 { 
+                                    style: "margin-bottom: 10px; color: #ecf0f1; font-size: 16px;",
+                                    "単語帳 ({flashcards().len()}件)" 
+                                }
+                                
+                                if flashcards().is_empty() {
+                                    div { 
+                                        style: "padding: 12px; background-color: #34495e; border-radius: 4px; color: #bdc3c7; font-size: 13px;",
+                                        "検索して単語を保存すると、ここに表示されます。"
+                                    }
+                                } else {
+                                    div { 
+                                        class: "flashcards-list",
+                                        style: "flex: 1; background-color: #34495e; border-radius: 4px; overflow-y: auto; max-height: 200px;",
+                                        {
+                                            let cards = flashcards();
+                                            rsx! {
+                                                for flashcard in cards.iter() {
+                                                    div { 
+                                                        key: "{flashcard.id}",
+                                                        class: "flashcard-item",
+                                                        style: format!("padding: 8px 12px; border-bottom: 1px solid #2c3e50; cursor: pointer; font-size: 13px; color: #ecf0f1; {} hover:background-color: #3c4f64;", 
+                                                            if let Some(ref selected) = selected_flashcard() {
+                                                                if selected.id == flashcard.id { "background-color: #3c5a7a;" } else { "" }
+                                                            } else { "" }
+                                                        ),
+                                                        onclick: {
+                                                            let card = flashcard.clone();
+                                                            move |_| {
+                                                                selected_flashcard.set(Some(card.clone()));
+                                                                show_flashcard_details.set(true);
+                                                            }
+                                                        },
+                                                        div { 
+                                                            style: "font-weight: bold; margin-bottom: 2px;",
+                                                            "{flashcard.term}"
+                                                        }
+                                                        div { 
+                                                            style: "font-size: 11px; color: #bdc3c7;",
+                                                            "{flashcard.created_at}"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // 選択した単語の詳細表示
+                                if show_flashcard_details() {
+                                    if let Some(ref card) = selected_flashcard() {
+                                        div { 
+                                            class: "flashcard-details",
+                                            style: "margin-top: 10px; background-color: #34495e; border-radius: 4px; padding: 12px;",
+                                            div { 
+                                                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;",
+                                                h4 { 
+                                                    style: "color: #3498db; font-size: 14px; margin: 0;",
+                                                    "{card.term}"
+                                                }
+                                                button { 
+                                                    style: "background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 18px; padding: 0;",
+                                                    onclick: move |_| {
+                                                        show_flashcard_details.set(false);
+                                                        selected_flashcard.set(None);
+                                                    },
+                                                    "×"
+                                                }
+                                            }
+                                            div { 
+                                                style: "color: #ecf0f1; font-size: 13px; line-height: 1.4; white-space: pre-wrap; max-height: 150px; overflow-y: auto;",
+                                                "{card.definition}"
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

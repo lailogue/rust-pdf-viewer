@@ -27,3 +27,5 @@ dioxus-desktop = "0.5"
 base64 = "0.22"
 futures = "0.3"
 rfd = "0.15.3"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
