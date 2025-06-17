@@ -79,7 +79,7 @@ async fn search_with_gemini(query: String, api_key: String) -> Result<String> {
     }
 }
 
-fn render_pdf_page(pdf_path: &PathBuf, page_index: usize) -> Option<String> {
+fn render_pdf_page_optimized(pdf_path: &PathBuf, page_index: usize) -> Option<String> {
     let lib_path = std::env::current_dir().ok()?.join("lib/libpdfium.dylib");
     let bindings = Pdfium::bind_to_library(&lib_path).ok()?;
     let pdfium = Pdfium::new(bindings);
@@ -98,13 +98,12 @@ fn render_pdf_page(pdf_path: &PathBuf, page_index: usize) -> Option<String> {
     let image_buffer = bitmap.as_raw_bytes();
     let mut rgba_pixels = Vec::with_capacity(width * height * 4);
     
-    for chunk in image_buffer.chunks(4) {
-        if chunk.len() >= 4 {
-            rgba_pixels.push(chunk[2]); // R
-            rgba_pixels.push(chunk[1]); // G  
-            rgba_pixels.push(chunk[0]); // B
-            rgba_pixels.push(chunk[3]); // A
-        }
+    // より効率的なカラー変換（chunk_exactを使用してbound checkを削減）
+    for chunk in image_buffer.chunks_exact(4) {
+        rgba_pixels.push(chunk[2]); // R
+        rgba_pixels.push(chunk[1]); // G  
+        rgba_pixels.push(chunk[0]); // B
+        rgba_pixels.push(chunk[3]); // A
     }
 
     let image = image::RgbaImage::from_vec(width as u32, height as u32, rgba_pixels)?;
@@ -139,11 +138,7 @@ fn get_pdf_info(pdf_path: &PathBuf) -> (usize, String) {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        eprintln!("Usage: {} <pdf_file>", args[0]);
-        std::process::exit(1);
-    }
+    // 引数は任意にして、アプリケーション内でファイル選択できるようにする
 
     let config = dioxus_desktop::Config::new()
         .with_window(
@@ -157,45 +152,62 @@ fn main() -> Result<()> {
 }
 
 fn App() -> Element {
-    let args: Vec<String> = std::env::args().collect();
-    let pdf_path = if args.len() >= 2 {
-        PathBuf::from(&args[1])
-    } else {
-        PathBuf::from("test.pdf") // fallback
-    };
+    // PDFファイルパスの状態管理（初期値はNone）
+    let mut pdf_path = use_signal(|| -> Option<PathBuf> {
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() >= 2 {
+            Some(PathBuf::from(&args[1]))
+        } else {
+            None
+        }
+    });
     
     let mut api_key = use_signal(|| String::new());
     let mut search_query = use_signal(|| String::new());
     let mut search_result = use_signal(|| String::new());
     let mut is_searching = use_signal(|| false);
     let mut page_cache = use_signal(|| HashMap::<usize, String>::new());
-    let mut is_loading = use_signal(|| true);
+    let mut is_loading = use_signal(|| false);
+    let mut error_message = use_signal(|| String::new());
+    let mut loaded_pdf_path = use_signal(|| -> Option<PathBuf> { None }); // 読み込み済みのPDFパスを追跡
     
-    let pdf_path_clone = pdf_path.clone();
-    let (total_pages, pdf_info) = use_memo(move || get_pdf_info(&pdf_path_clone))();
+    // PDFファイル情報の取得（PDFが選択されている場合のみ）
+    let (total_pages, pdf_info) = use_memo(move || {
+        if let Some(path) = pdf_path() {
+            get_pdf_info(&path)
+        } else {
+            (0, "PDFファイルが選択されていません".to_string())
+        }
+    })();
     
-    // 段階的な並列読み込み（最初の数ページを優先）
-    let pdf_path_clone2 = pdf_path.clone();
+    // PDFが選択されたときの読み込み処理（新しいファイルの場合のみ）
     use_effect(move || {
-        if total_pages > 0 && is_loading() {
-            let path = pdf_path_clone2.clone();
-            spawn(async move {
-                // 最初の3ページを最優先で読み込み
-                for page_idx in 0..3.min(total_pages) {
-                    if let Some(image_data) = render_pdf_page(&path, page_idx) {
-                        page_cache.write().insert(page_idx, image_data);
-                    }
-                }
+        if let Some(path) = pdf_path() {
+            // 新しいファイルかどうかチェック
+            let should_load = loaded_pdf_path().as_ref() != Some(&path);
+            
+            if total_pages > 0 && !is_loading() && should_load {
+                is_loading.set(true);
+                page_cache.write().clear(); // 既存のキャッシュをクリア
+                error_message.set(String::new());
                 
-                // 残りのページを並列で読み込み（4ページずつバッチ処理）
-                let chunk_size = 4;
+                spawn(async move {
+                    // 最初の3ページを最優先で読み込み
+                    for page_idx in 0..3.min(total_pages) {
+                        if let Some(image_data) = render_pdf_page_optimized(&path, page_idx) {
+                            page_cache.write().insert(page_idx, image_data);
+                        }
+                    }
+                
+                // 残りのページを並列で読み込み（CPUコア数に基づいてバッチサイズを決定）
+                let chunk_size = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).min(8);
                 for chunk_start in (3..total_pages).step_by(chunk_size) {
                     let chunk_end = (chunk_start + chunk_size).min(total_pages);
                     let batch_futures: Vec<_> = (chunk_start..chunk_end)
                         .map(|page_idx| {
                             let path_clone = path.clone();
                             async move {
-                                render_pdf_page(&path_clone, page_idx).map(|data| (page_idx, data))
+                                render_pdf_page_optimized(&path_clone, page_idx).map(|data| (page_idx, data))
                             }
                         })
                         .collect();
@@ -212,8 +224,10 @@ fn App() -> Element {
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
                 }
                 
-                is_loading.set(false);
-            });
+                    is_loading.set(false);
+                    loaded_pdf_path.set(Some(path)); // 読み込み完了したパスを記録
+                });
+            }
         }
     });
 
@@ -234,14 +248,62 @@ fn App() -> Element {
         }
         div { class: "app",
             div { class: "main-content",
-                h1 { "PDF Viewer - Dioxus" }
-                
-                if total_pages == 0 {
-                    div { class: "error",
-                        "{pdf_info}"
+                div { 
+                    class: "header",
+                    style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 4px;",
+                    h1 { "PDF Viewer - Dioxus" }
+                    div { 
+                        class: "file-controls",
+                        style: "display: flex; gap: 10px;",
+                        button {
+                            class: "file-select-btn",
+                            style: "padding: 8px 16px; background-color: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    if let Some(file_handle) = rfd::AsyncFileDialog::new()
+                                        .add_filter("PDF files", &["pdf"])
+                                        .set_title("PDFファイルを選択")
+                                        .pick_file()
+                                        .await 
+                                    {
+                                        let selected_path = file_handle.path().to_path_buf();
+                                        pdf_path.set(Some(selected_path));
+                                        page_cache.write().clear();
+                                        loaded_pdf_path.set(None); // 新しいファイル選択時にリセット
+                                        is_loading.set(false);
+                                    }
+                                });
+                            },
+                            "📁 PDFを開く"
+                        }
+                        if pdf_path().is_some() {
+                            button {
+                                class: "file-close-btn",
+                                style: "padding: 8px 16px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;",
+                                onclick: move |_| {
+                                    pdf_path.set(None);
+                                    page_cache.write().clear();
+                                    loaded_pdf_path.set(None); // ファイル閉じる時にもリセット
+                                    is_loading.set(false);
+                                    error_message.set(String::new());
+                                },
+                                "❌ 閉じる"
+                            }
+                        }
                     }
-                } else {
+                }
+                
+                if !error_message().is_empty() {
+                    div { 
+                        class: "error",
+                        style: "margin-bottom: 15px; padding: 10px; background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; border-radius: 4px;",
+                        "{error_message()}"
+                    }
+                }
+                
+                if pdf_path().is_some() && total_pages > 0 {
                     div { class: "controls",
+                        style: "margin-bottom: 15px; padding: 10px; background-color: #f8f9fa; border-radius: 4px; display: flex; align-items: center; gap: 10px;",
                         span { class: "page-info",
                             if is_loading() {
                                 "全 {total_pages} ページ読み込み中... ({rendered_pages().len()}/{total_pages})"
@@ -253,15 +315,32 @@ fn App() -> Element {
                         if is_loading() {
                             div {
                                 class: "loading-indicator",
-                                style: "margin-left: 10px; padding: 5px 10px; background-color: #3498db; color: white; border-radius: 4px; font-size: 12px;",
+                                style: "padding: 5px 10px; background-color: #3498db; color: white; border-radius: 4px; font-size: 12px;",
                                 "読み込み中..."
                             }
                         }
                     }
+                }
+                
+                div { 
+                    class: "content-area",
+                    style: "display: flex; flex-direction: row; flex: 1; height: calc(100vh - 160px); overflow: hidden;",
                     
-                    div { 
-                        class: "content-area",
-                        style: "display: flex; flex-direction: row; flex: 1; height: calc(100vh - 120px); overflow: hidden;",
+                    if pdf_path().is_none() {
+                        div { 
+                            class: "welcome",
+                            style: "flex: 1; text-align: center; padding: 40px; color: #6c757d; border: 2px dashed #dee2e6; border-radius: 8px; margin: 20px; display: flex; flex-direction: column; justify-content: center;",
+                            h2 { "PDFビューアーへようこそ" }
+                            p { "上の「📁 PDFを開く」ボタンをクリックしてPDFファイルを選択してください。" }
+                            p { "AI検索機能で調べたい語句の意味を尋ねることができます。" }
+                        }
+                    } else if total_pages == 0 {
+                        div { 
+                            class: "error",
+                            style: "flex: 1; padding: 20px;",
+                            "{pdf_info}"
+                        }
+                    } else {
                         div { 
                             class: "pdf-section",
                             style: "flex: 1; display: flex; flex-direction: column; overflow: hidden; height: 100%;",

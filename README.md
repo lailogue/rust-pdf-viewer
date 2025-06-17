@@ -4,18 +4,20 @@ A modern PDF viewer application built with Rust and Dioxus, featuring AI-powered
 
 ## Key Features
 
+- **Dynamic File Selection**: Open and close PDF files through an intuitive file dialog interface
 - **High-Quality PDF Display**: Renders PDF pages at 1000x1400 resolution for balanced quality and performance
 - **Continuous Scroll**: View all PDF pages in a seamless continuous scroll interface
-- **AI-Powered Search**: Integrated Gemini 2.5 Flash API for intelligent content search
+- **AI-Powered Search**: Integrated Gemini 2.5 Flash API for intelligent content analysis and term explanations
 - **Modern UI**: Clean, responsive interface built with Dioxus framework
 - **Optimized Layout**: Specially designed for vertical PDF documents with horizontal AI search panel
-- **Page Caching**: Intelligent caching system for improved performance
+- **Smart Caching**: Intelligent page caching system with optimized loading to prevent unnecessary re-rendering
 - **Cross-platform**: Desktop application with native performance
 
 ## Technology Stack
 
 - **Dioxus** - Modern reactive UI framework for Rust
 - **pdfium-render** - PDF rendering using Google's PDFium library
+- **rfd** - Native file dialog integration for file selection
 - **Reqwest** - HTTP client for AI search functionality
 - **Tokio** - Async runtime for non-blocking operations
 - **Serde** - JSON serialization for API communication
@@ -41,49 +43,56 @@ cd rust-pdf-viewer
 # Setup PDFium library (macOS)
 mkdir -p lib
 
-# Download PDFium library for macOS (Apple Silicon)
-curl -L -o lib/libpdfium.dylib \
-  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz" && \
-  tar -xzf lib/libpdfium.dylib -C lib --strip-components=1 lib/libpdfium.dylib
+# Download PDFium library for macOS (Intel/x64)
+curl -L -o pdfium-mac-x64.tgz \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz" && \
+  tar -xzf pdfium-mac-x64.tgz -C lib --strip-components=1 && \
+  rm pdfium-mac-x64.tgz
 
-# For Intel Macs, use this instead:
-# curl -L -o pdfium-mac-x64.tgz \
-#   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz" && \
-#   tar -xzf pdfium-mac-x64.tgz -C lib --strip-components=1 lib/libpdfium.dylib && \
-#   rm pdfium-mac-x64.tgz
+# For Apple Silicon Macs, use this instead:
+# curl -L -o pdfium-mac-arm64.tgz \
+#   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz" && \
+#   tar -xzf pdfium-mac-arm64.tgz -C lib --strip-components=1 && \
+#   rm pdfium-mac-arm64.tgz
 
 # Verify the library is correctly placed
 ls -la lib/libpdfium.dylib
 
-# Build the project
-cargo build --release
-
-# Run with a PDF file
-cargo run -- <PDF_FILE_PATH>
-
-# Example
-cargo run -- test.pdf
+# Build and run the project
+cargo run
 ```
 
 ### Using the Application
 
-1. **Launch the application** with a PDF file as argument
-2. **Navigate pages** using the Previous/Next buttons at the top
-3. **AI Search**:
+1. **Launch the application** - no arguments required
+2. **Open a PDF file**:
+   - Click the "📁 PDFを開く" (Open PDF) button in the header
+   - Select a PDF file from the file dialog
+3. **View PDF content**:
+   - All pages are displayed in a continuous scroll format
+   - Loading progress is shown at the top during initial page rendering
+4. **AI Search functionality**:
    - Enter your Gemini API key in the right panel
-   - Type your search query
+   - Type your search query to ask about terms or concepts
    - Click "検索" (Search) to get AI-powered explanations
-4. **View results** in the expandable search results area
+5. **File management**:
+   - Use "❌ 閉じる" (Close) button to close the current PDF
+   - Open different files without restarting the application
 
 ## Application Layout
 
-- **Left Panel**: PDF display area optimized for vertical documents
-- **Right Panel**: AI search interface
-  - API key input (password field)
-  - Search query input
-  - Search button with loading indicator
-  - Expandable results area with clean text formatting
-- **Top Bar**: Page navigation controls and PDF information
+- **Header Bar**: File control buttons and application title
+  - "📁 PDFを開く" (Open PDF) button for file selection
+  - "❌ 閉じる" (Close) button to close current PDF
+- **Status Bar**: Loading progress and PDF information (when PDF is loaded)
+- **Main Content Area**:
+  - **Left Panel**: PDF display area optimized for vertical documents with continuous scroll
+  - **Right Panel**: AI search interface
+    - API key input (password field)
+    - Search query input for term explanations
+    - Search button with loading indicator
+    - Results area with clean text formatting
+- **Welcome Screen**: Displayed when no PDF is loaded with usage instructions
 
 ## Implementation Highlights
 
@@ -100,10 +109,11 @@ cargo run -- test.pdf
 - Comprehensive error handling
 
 ### Performance Optimizations
-- Page-level caching system using HashMap
-- Lazy loading of PDF pages
-- Memory-efficient image handling
-- Responsive UI updates
+- Smart page-level caching system using HashMap with duplicate loading prevention
+- Optimized parallel page rendering with CPU-aware batch processing
+- Memory-efficient image handling with color space optimization
+- Responsive UI updates with non-blocking async operations
+- Single-load policy to prevent unnecessary re-rendering of same PDF files
 
 ### Modern Dioxus Architecture
 - Reactive state management with `use_signal`
@@ -127,10 +137,11 @@ cargo run -- test.pdf
 ## Development
 
 ### Code Organization
-- **PDF Rendering**: `render_pdf_page()` function handles high-resolution page rendering
+- **PDF Rendering**: `render_pdf_page_optimized()` function handles high-resolution page rendering with optimizations
+- **File Management**: Dynamic PDF loading/closing with native file dialog integration
 - **AI Search**: `search_with_gemini()` async function for API integration
 - **Text Processing**: `clean_markdown_text()` for formatting search results
-- **UI Components**: Reactive Dioxus components with modern state management
+- **UI Components**: Reactive Dioxus components with modern state management and responsive layout
 
 ### Dependencies
 All dependencies are optimized for the Dioxus ecosystem, removing legacy egui dependencies for a cleaner, more maintainable codebase.
