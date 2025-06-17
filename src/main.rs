@@ -122,6 +122,36 @@ struct ClaudeContent {
     text: String,
 }
 
+fn get_pdfium_library_path() -> PathBuf {
+    // Check if we're running in a macOS app bundle
+    if let Ok(exe_path) = std::env::current_exe() {
+        // Check if we're in an app bundle structure (Contents/MacOS/)
+        if let Some(macos_dir) = exe_path.parent() {
+            if let Some(contents_dir) = macos_dir.parent() {
+                if let Some(dir_name) = contents_dir.file_name() {
+                    if dir_name == "Contents" {
+                        // We're in an app bundle, look in Resources/lib/
+                        let bundle_lib_path = contents_dir.join("Resources").join("lib").join("libpdfium.dylib");
+                        if bundle_lib_path.exists() {
+                            println!("Using PDFium from app bundle: {:?}", bundle_lib_path);
+                            return bundle_lib_path;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback to development path
+    let dev_path = std::env::current_dir()
+        .unwrap_or_default()
+        .join("lib")
+        .join("libpdfium.dylib");
+    
+    println!("Using PDFium from development path: {:?}", dev_path);
+    dev_path
+}
+
 fn filter_overlapping_text(mut text_elements: Vec<TextElement>) -> Vec<TextElement> {
     // ページ内のテキスト重なりを防ぐためのフィルタリング
     let mut filtered_elements: Vec<TextElement> = Vec::new();
@@ -286,7 +316,7 @@ async fn search_with_ai(provider: AIProvider, query: String, api_key: String) ->
 
 fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<PdfPageData> {
     println!("DEBUG: Starting page {} processing", page_index);
-    let lib_path = std::env::current_dir().ok()?.join("lib/libpdfium.dylib");
+    let lib_path = get_pdfium_library_path();
     let bindings = Pdfium::bind_to_library(&lib_path).ok()?;
     let pdfium = Pdfium::new(bindings);
     let document = pdfium.load_pdf_from_file(pdf_path, None).ok()?;
@@ -475,7 +505,7 @@ fn render_pdf_page_optimized(pdf_path: &PathBuf, page_index: usize) -> Option<St
 }
 
 fn get_pdf_info(pdf_path: &PathBuf) -> (usize, String) {
-    let lib_path = std::env::current_dir().unwrap_or_default().join("lib/libpdfium.dylib");
+    let lib_path = get_pdfium_library_path();
     match Pdfium::bind_to_library(&lib_path) {
         Ok(bindings) => {
             let pdfium = Pdfium::new(bindings);
