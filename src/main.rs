@@ -2,7 +2,6 @@
 use anyhow::Result;
 use dioxus::prelude::*;
 use std::collections::HashMap;
-use std::env;
 use std::path::PathBuf;
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -13,6 +12,29 @@ enum AIProvider {
     Gemini,
     ChatGPT,
     Claude,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PdfPageData {
+    image_data: String,
+    text_elements: Vec<TextElement>,
+    page_width: f32,
+    page_height: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TextElement {
+    text: String,
+    bounds: TextBounds,
+    font_size: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct TextBounds {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 }
 
 impl AIProvider {
@@ -215,13 +237,14 @@ async fn search_with_ai(provider: AIProvider, query: String, api_key: String) ->
     }
 }
 
-fn render_pdf_page_optimized(pdf_path: &PathBuf, page_index: usize) -> Option<String> {
+fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<PdfPageData> {
     let lib_path = std::env::current_dir().ok()?.join("lib/libpdfium.dylib");
     let bindings = Pdfium::bind_to_library(&lib_path).ok()?;
     let pdfium = Pdfium::new(bindings);
     let document = pdfium.load_pdf_from_file(pdf_path, None).ok()?;
     let page = document.pages().get(page_index as u16).ok()?;
     
+    // レンダリング設定で適切な処理を行う
     let render_config = PdfRenderConfig::new()
         .set_target_width(1000)
         .set_maximum_height(1400)
@@ -231,10 +254,127 @@ fn render_pdf_page_optimized(pdf_path: &PathBuf, page_index: usize) -> Option<St
     let width = bitmap.width() as usize;
     let height = bitmap.height() as usize;
     
+    // Get page dimensions for coordinate scaling
+    let page_width = page.width().value;
+    let page_height = page.height().value;
+    let scale_x = bitmap.width() as f32 / page_width;
+    let scale_y = bitmap.height() as f32 / page_height;
+    
+    // ページ固有の情報を調査
+    let _rotation = page.rotation();
+    let is_landscape = page_width > page_height;
+    let _was_rotated = is_landscape && (bitmap.width() < bitmap.height());
+    
+    if page_index == 0 {
+        println!("Page {}: PDF {}x{} -> Bitmap {}x{}, Scale: {:.3}x{:.3}", 
+            page_index, page_width, page_height, bitmap.width(), bitmap.height(), scale_x, scale_y);
+    }
+    
+    // Extract text with coordinates using proper pdfium-render API
+    let mut text_elements = Vec::new();
+    
+    if let Ok(page_text) = page.text() {
+        let chars = page_text.chars();
+        let mut current_word = String::new();
+        let mut word_bounds: Option<TextBounds> = None;
+        let mut word_font_size = 0.0;
+        
+        // レンダリング設定を考慮した座標変換の計算
+        let render_width = bitmap.width() as f32;
+        let render_height = bitmap.height() as f32;
+        
+        for char_index in 0..chars.len() {
+            if let Ok(char_obj) = chars.get(char_index as usize) {
+                if let Some(char_string) = char_obj.unicode_string() {
+                    if let Ok(bounds) = char_obj.loose_bounds() {
+                        // PDF座標を取得
+                        let pdf_left = bounds.left().value;
+                        let pdf_right = bounds.right().value;
+                        let pdf_top = bounds.top().value;
+                        let pdf_bottom = bounds.bottom().value;
+                        
+                        // 基本的な座標変換
+                        // PDFは左下原点、HTMLは左上原点なので、Y座標を反転
+                        let transformed_x = pdf_left * scale_x;
+                        let transformed_y = render_height - (pdf_top * scale_y);
+                        
+                        let scaled_bounds = TextBounds {
+                            x: transformed_x,
+                            y: transformed_y,
+                            width: (pdf_right - pdf_left) * scale_x,
+                            height: (pdf_top - pdf_bottom) * scale_y,
+                        };
+                        
+                        // 詳細なデバッグ情報
+                        if char_index < 5 && page_index == 0 {
+                            println!("Page {} Char '{}': PDF({:.1},{:.1},{:.1},{:.1}) -> Rendered({:.1},{:.1}) Size({:.1}x{:.1})", 
+                                page_index, char_string, pdf_left, pdf_bottom, pdf_right, pdf_top,
+                                scaled_bounds.x, scaled_bounds.y, scaled_bounds.width, scaled_bounds.height);
+                        }
+                        
+                        // 文字を単語にグループ化（より良い選択体験のため）
+                        if char_string.trim().is_empty() {
+                            // スペースまたは空白 - 現在の単語を終了
+                            if !current_word.is_empty() {
+                                if let Some(bounds) = word_bounds {
+                                    text_elements.push(TextElement {
+                                        text: current_word.clone(),
+                                        bounds,
+                                        font_size: word_font_size,
+                                    });
+                                }
+                                current_word.clear();
+                                word_bounds = None;
+                            }
+                        } else {
+                            // 通常の文字 - 現在の単語に追加
+                            current_word.push_str(&char_string);
+                            word_font_size = scaled_bounds.height;
+                            
+                            if let Some(ref mut existing_bounds) = word_bounds {
+                                // 既存の単語境界を拡張
+                                let right_edge = scaled_bounds.x + scaled_bounds.width;
+                                existing_bounds.width = right_edge - existing_bounds.x;
+                                existing_bounds.height = existing_bounds.height.max(scaled_bounds.height);
+                                // Y座標は最初の文字の位置を維持
+                            } else {
+                                // 新しい単語境界を開始
+                                word_bounds = Some(scaled_bounds);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 最後の単語を忘れないように
+        if !current_word.is_empty() {
+            if let Some(bounds) = word_bounds {
+                text_elements.push(TextElement {
+                    text: current_word,
+                    bounds,
+                    font_size: word_font_size,
+                });
+            }
+        }
+        
+        println!("Page {}: Extracted {} text elements", page_index, text_elements.len());
+        
+        // 座標の妥当性をチェック（一部のサンプル）
+        if !text_elements.is_empty() && page_index < 3 {
+            let sample = &text_elements[0];
+            println!("  Sample text '{}' at ({:.1}%, {:.1}%) size {:.1}%", 
+                sample.text, 
+                sample.bounds.x / render_width * 100.0,
+                sample.bounds.y / render_height * 100.0,
+                sample.bounds.height / render_height * 100.0);
+        }
+    }
+    
+    // Render image (existing logic)
     let image_buffer = bitmap.as_raw_bytes();
     let mut rgba_pixels = Vec::with_capacity(width * height * 4);
     
-    // より効率的なカラー変換（chunk_exactを使用してbound checkを削減）
     for chunk in image_buffer.chunks_exact(4) {
         rgba_pixels.push(chunk[2]); // R
         rgba_pixels.push(chunk[1]); // G  
@@ -248,7 +388,19 @@ fn render_pdf_page_optimized(pdf_path: &PathBuf, page_index: usize) -> Option<St
         .write_to(&mut std::io::Cursor::new(&mut png_data), image::ImageFormat::Png)
         .ok()?;
     
-    Some(format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png_data)))
+    let image_data = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png_data));
+    
+    Some(PdfPageData {
+        image_data,
+        text_elements,
+        page_width: bitmap.width() as f32,
+        page_height: bitmap.height() as f32,
+    })
+}
+
+// Keep the old function for backward compatibility during transition
+fn render_pdf_page_optimized(pdf_path: &PathBuf, page_index: usize) -> Option<String> {
+    render_pdf_page_with_text(pdf_path, page_index).map(|data| data.image_data)
 }
 
 fn get_pdf_info(pdf_path: &PathBuf) -> (usize, String) {
@@ -305,7 +457,7 @@ fn App() -> Element {
     let mut search_query = use_signal(|| String::new());
     let mut search_result = use_signal(|| String::new());
     let mut is_searching = use_signal(|| false);
-    let mut page_cache = use_signal(|| HashMap::<usize, String>::new());
+    let mut page_cache = use_signal(|| HashMap::<usize, PdfPageData>::new());
     let mut is_loading = use_signal(|| false);
     let mut error_message = use_signal(|| String::new());
     let mut loaded_pdf_path = use_signal(|| -> Option<PathBuf> { None }); // 読み込み済みのPDFパスを追跡
@@ -333,8 +485,8 @@ fn App() -> Element {
                 spawn(async move {
                     // 最初の3ページを最優先で読み込み
                     for page_idx in 0..3.min(total_pages) {
-                        if let Some(image_data) = render_pdf_page_optimized(&path, page_idx) {
-                            page_cache.write().insert(page_idx, image_data);
+                        if let Some(page_data) = render_pdf_page_with_text(&path, page_idx) {
+                            page_cache.write().insert(page_idx, page_data);
                         }
                     }
                 
@@ -346,7 +498,7 @@ fn App() -> Element {
                         .map(|page_idx| {
                             let path_clone = path.clone();
                             async move {
-                                render_pdf_page_optimized(&path_clone, page_idx).map(|data| (page_idx, data))
+                                render_pdf_page_with_text(&path_clone, page_idx).map(|data| (page_idx, data))
                             }
                         })
                         .collect();
@@ -354,8 +506,8 @@ fn App() -> Element {
                     // バッチを並列実行
                     let results = futures::future::join_all(batch_futures).await;
                     for result in results {
-                        if let Some((page_idx, image_data)) = result {
-                            page_cache.write().insert(page_idx, image_data);
+                        if let Some((page_idx, page_data)) = result {
+                            page_cache.write().insert(page_idx, page_data);
                         }
                     }
                     
@@ -374,8 +526,8 @@ fn App() -> Element {
     let rendered_pages = use_memo(move || {
         let mut pages = Vec::new();
         for page_idx in 0..total_pages {
-            if let Some(image_data) = page_cache().get(&page_idx) {
-                pages.push((page_idx, image_data.clone()));
+            if let Some(page_data) = page_cache().get(&page_idx) {
+                pages.push((page_idx, page_data.clone()));
             }
         }
         pages
@@ -493,7 +645,7 @@ fn App() -> Element {
                             div { 
                                 class: "pdf-viewer",
                                 style: "flex: 1; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; padding: 10px; gap: 20px; height: 100%; max-height: calc(100vh - 200px);",
-                                for (page_idx, image_data) in rendered_pages() {
+                                for (page_idx, page_data) in rendered_pages.read().iter() {
                                     div {
                                         key: "{page_idx}",
                                         class: "page-container",
@@ -503,20 +655,49 @@ fn App() -> Element {
                                             style: "margin-bottom: 10px; font-weight: bold; color: #2c3e50;",
                                             "ページ {page_idx + 1}"
                                         }
-                                        img {
-                                            src: "{image_data}",
-                                            alt: "PDF Page {page_idx + 1}",
-                                            class: "pdf-page",
-                                            style: "max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); background-color: white; margin-bottom: 10px;"
+                                        div {
+                                            class: "page-wrapper",
+                                            style: "position: relative; display: block; width: 100%; max-width: 800px;",
+                                            img {
+                                                src: "{page_data.image_data}",
+                                                alt: "PDF Page {page_idx + 1}",
+                                                class: "pdf-page",
+                                                style: "display: block; width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); background-color: white; margin-bottom: 10px;"
+                                            }
+                                            div {
+                                                class: "text-overlay",
+                                                style: "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; border-radius: 4px;",
+                                                for (text_idx, text_elem) in page_data.text_elements.iter().enumerate() {
+                                                    span {
+                                                        key: "{page_idx}-{text_idx}",
+                                                        class: "selectable-text",
+                                                        style: "position: absolute; 
+                                                               left: {text_elem.bounds.x / page_data.page_width * 100.0}%; 
+                                                               top: {text_elem.bounds.y / page_data.page_height * 100.0}%;
+                                                               width: {text_elem.bounds.width / page_data.page_width * 100.0}%;
+                                                               height: {text_elem.bounds.height / page_data.page_height * 100.0}%;
+                                                               font-size: {text_elem.font_size / page_data.page_height * 100.0}%;
+                                                               color: transparent;
+                                                               pointer-events: auto;
+                                                               user-select: text;
+                                                               cursor: text;
+                                                               font-family: monospace;
+                                                               line-height: 1;
+                                                               overflow: hidden;
+                                                               white-space: nowrap;",
+                                                        "{text_elem.text}"
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                                 
-                                if is_loading() && rendered_pages().len() < total_pages {
+                                if is_loading() && rendered_pages.read().len() < total_pages {
                                     div {
                                         class: "loading-pages-placeholder",
                                         style: "text-align: center; padding: 40px; color: #3498db; font-style: italic; border: 2px dashed #3498db; border-radius: 8px; background-color: #ecf0f1;",
-                                        "残り {total_pages - rendered_pages().len()} ページを読み込み中..."
+                                        "残り {total_pages - rendered_pages.read().len()} ページを読み込み中..."
                                     }
                                 }
                             }
