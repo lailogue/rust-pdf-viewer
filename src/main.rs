@@ -53,6 +53,23 @@ struct RecentFile {
     last_opened: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct ApiKeys {
+    gemini: String,
+    chatgpt: String,
+    claude: String,
+}
+
+impl Default for ApiKeys {
+    fn default() -> Self {
+        Self {
+            gemini: String::new(),
+            chatgpt: String::new(),
+            claude: String::new(),
+        }
+    }
+}
+
 impl FlashCard {
     fn new(term: String, definition: String) -> Self {
         let id = format!("{}-{}", 
@@ -180,6 +197,39 @@ fn add_recent_file(file_path: &PathBuf) -> Result<()> {
     recent_files.truncate(10);
     
     save_recent_files(&recent_files)
+}
+
+// APIキー管理用のヘルパー関数
+fn load_api_keys() -> ApiKeys {
+    let path = get_api_keys_path();
+    if !path.exists() {
+        return ApiKeys::default();
+    }
+    
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            serde_json::from_str(&content).unwrap_or_else(|_| ApiKeys::default())
+        }
+        Err(_) => ApiKeys::default()
+    }
+}
+
+fn save_api_keys(api_keys: &ApiKeys) -> Result<()> {
+    let path = get_api_keys_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let content = serde_json::to_string_pretty(api_keys)?;
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+fn get_api_keys_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("pdf-viewer");
+    path.push("api_keys.json");
+    path
 }
 
 
@@ -692,9 +742,12 @@ fn App() -> Element {
     });
     
     let mut selected_provider = use_signal(|| AIProvider::Gemini);
-    let mut gemini_api_key = use_signal(|| String::new());
-    let mut chatgpt_api_key = use_signal(|| String::new());
-    let mut claude_api_key = use_signal(|| String::new());
+    
+    // APIキーを保存済みのものから読み込み
+    let saved_api_keys = use_signal(|| load_api_keys());
+    let mut gemini_api_key = use_signal(|| saved_api_keys().gemini);
+    let mut chatgpt_api_key = use_signal(|| saved_api_keys().chatgpt);
+    let mut claude_api_key = use_signal(|| saved_api_keys().claude);
     let mut search_query = use_signal(|| String::new());
     let mut search_result = use_signal(|| String::new());
     let mut is_searching = use_signal(|| false);
@@ -1034,10 +1087,38 @@ fn App() -> Element {
                                             AIProvider::Claude => claude_api_key(),
                                         },
                                         oninput: move |evt| {
+                                            let new_value = evt.value().clone();
                                             match selected_provider() {
-                                                AIProvider::Gemini => gemini_api_key.set(evt.value().clone()),
-                                                AIProvider::ChatGPT => chatgpt_api_key.set(evt.value().clone()),
-                                                AIProvider::Claude => claude_api_key.set(evt.value().clone()),
+                                                AIProvider::Gemini => {
+                                                    gemini_api_key.set(new_value.clone());
+                                                    // APIキーを保存
+                                                    let api_keys = ApiKeys {
+                                                        gemini: new_value,
+                                                        chatgpt: chatgpt_api_key(),
+                                                        claude: claude_api_key(),
+                                                    };
+                                                    let _ = save_api_keys(&api_keys);
+                                                },
+                                                AIProvider::ChatGPT => {
+                                                    chatgpt_api_key.set(new_value.clone());
+                                                    // APIキーを保存
+                                                    let api_keys = ApiKeys {
+                                                        gemini: gemini_api_key(),
+                                                        chatgpt: new_value,
+                                                        claude: claude_api_key(),
+                                                    };
+                                                    let _ = save_api_keys(&api_keys);
+                                                },
+                                                AIProvider::Claude => {
+                                                    claude_api_key.set(new_value.clone());
+                                                    // APIキーを保存
+                                                    let api_keys = ApiKeys {
+                                                        gemini: gemini_api_key(),
+                                                        chatgpt: chatgpt_api_key(),
+                                                        claude: new_value,
+                                                    };
+                                                    let _ = save_api_keys(&api_keys);
+                                                },
                                             }
                                         }
                                     }

@@ -67,49 +67,40 @@ sudo yum install rust cargo
 sudo dnf install rust cargo
 ```
 
-### PDFium Library
 
-#### macOS
-The application requires PDFium native libraries. The required library for macOS (`libpdfium.dylib`) is included in the `lib/` directory.
+### AI API Keys
+To use the AI search functionality, obtain one or more of the following API keys:
 
-#### Linux
-For Linux systems, you'll need to download the appropriate PDFium library:
-```bash
-# For x64 systems
-curl -L -o pdfium-linux-x64.tgz \
-  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz" && \
-  tar -xzf pdfium-linux-x64.tgz -C lib --strip-components=1 && \
-  rm pdfium-linux-x64.tgz
-
-# For ARM64 systems
-curl -L -o pdfium-linux-arm64.tgz \
-  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-arm64.tgz" && \
-  tar -xzf pdfium-linux-arm64.tgz -C lib --strip-components=1 && \
-  rm pdfium-linux-arm64.tgz
-```
-
-### Gemini API Key
-To use the AI search functionality, obtain a Gemini API key from Google AI Studio:
+**Gemini API (Google):**
 https://makersuite.google.com/app/apikey
+
+**ChatGPT API (OpenAI):**
+https://platform.openai.com/api-keys
+
+**Claude API (Anthropic):**
+https://console.anthropic.com/
 
 ## Installation & Usage
 
 ### Building from Source
+
+#### macOS
+
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd rust-pdf-viewer
 
-# Setup PDFium library (macOS)
+# Create lib directory for PDFium library
 mkdir -p lib
 
-# Download PDFium library for macOS (Intel/x64)
+# Download PDFium library for Intel Macs (x64)
 curl -L -o pdfium-mac-x64.tgz \
   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz" && \
   tar -xzf pdfium-mac-x64.tgz -C lib --strip-components=1 && \
   rm pdfium-mac-x64.tgz
 
-# For Apple Silicon Macs, use this instead:
+# For Apple Silicon Macs (ARM64), use this instead:
 # curl -L -o pdfium-mac-arm64.tgz \
 #   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz" && \
 #   tar -xzf pdfium-mac-arm64.tgz -C lib --strip-components=1 && \
@@ -117,6 +108,42 @@ curl -L -o pdfium-mac-x64.tgz \
 
 # Verify the library is correctly placed
 ls -la lib/libpdfium.dylib
+
+# Build and run the project
+cargo run
+
+# To build a macOS app bundle (.app file)
+cargo install cargo-bundle
+cargo bundle --release
+
+# The app bundle will be created at:
+# target/release/bundle/osx/PDF Viewer.app
+```
+
+#### Linux
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd rust-pdf-viewer
+
+# Create lib directory for PDFium library
+mkdir -p lib
+
+# Download PDFium library for x64 systems
+curl -L -o pdfium-linux-x64.tgz \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz" && \
+  tar -xzf pdfium-linux-x64.tgz -C lib --strip-components=1 && \
+  rm pdfium-linux-x64.tgz
+
+# For ARM64 systems, use this instead:
+# curl -L -o pdfium-linux-arm64.tgz \
+#   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-arm64.tgz" && \
+#   tar -xzf pdfium-linux-arm64.tgz -C lib --strip-components=1 && \
+#   rm pdfium-linux-arm64.tgz
+
+# Verify the library is correctly placed
+ls -la lib/libpdfium.so
 
 # Build and run the project
 cargo run
@@ -132,9 +159,11 @@ cargo run
    - All pages are displayed in a continuous scroll format
    - Loading progress is shown at the top during initial page rendering
 4. **AI Search functionality**:
-   - Enter your Gemini API key in the right panel
+   - Select AI provider: Gemini, ChatGPT, or Claude
+   - Enter your API key once - it will be automatically saved and restored in future sessions
    - Type your search query to ask about terms or concepts
    - Click "検索" (Search) to get AI-powered explanations
+   - Searched terms are automatically saved to your flashcard collection
 5. **File management**:
    - Use "❌ 閉じる" (Close) button to close the current PDF
    - Open different files without restarting the application
@@ -148,10 +177,12 @@ cargo run
 - **Main Content Area**:
   - **Left Panel**: PDF display area optimized for vertical documents with continuous scroll
   - **Right Panel**: AI search interface
-    - API key input (password field)
+    - AI provider selection (Gemini, ChatGPT, Claude)
+    - API key input (password field) with automatic save/restore
     - Search query input for term explanations
     - Search button with loading indicator
     - Results area with clean text formatting
+    - Flashcard button to view saved search terms
 - **Welcome Screen**: Displayed when no PDF is loaded with usage instructions
 
 ## Data Storage
@@ -160,9 +191,14 @@ cargo run
 The application automatically saves search terms and their AI-generated definitions as flashcards for future reference.
 
 **Storage Location:**
-- **macOS**: `~/.config/pdf-viewer/flashcards.json`
-- **Linux**: `~/.config/pdf-viewer/flashcards.json`  
-- **Windows**: `%USERPROFILE%\.config\pdf-viewer\flashcards.json`
+- **macOS**: `~/.config/pdf-viewer/`
+- **Linux**: `~/.config/pdf-viewer/`  
+- **Windows**: `%USERPROFILE%\.config\pdf-viewer\`
+
+**Data Files:**
+- `flashcards.json` - Saved search terms and definitions
+- `recent_files.json` - Recently opened PDF files (max 10)
+- `api_keys.json` - Saved API keys for AI providers
 
 **Data Format:**
 Flashcards are stored in JSON format with the following structure:

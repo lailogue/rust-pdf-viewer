@@ -7,7 +7,10 @@ RustとDioxusによるモダンなPDF閲覧アプリケーション。Gemini AI�
 - **動的ファイル選択**: 直感的なファイルダイアログインターフェースによるPDFファイルの開閉
 - **高品質PDF表示**: 1000x1400解像度で品質とパフォーマンスのバランスを実現
 - **連続スクロール**: 全PDFページをシームレスな連続スクロールで表示
-- **AI検索機能**: Gemini 2.5 Flash APIによる知的なコンテンツ分析と用語解説
+- **AI検索機能**: Gemini、ChatGPT、Claude APIによる知的なコンテンツ分析と用語解説
+- **単語帳機能**: AI検索結果の自動保存と管理
+- **最近のファイル**: 最近開いたPDFファイルの履歴管理（最大10件）
+- **APIキー保存**: 入力したAPIキーの自動保存と復元
 - **モダンUI**: Dioxusフレームワークによる美しくレスポンシブなインターフェース
 - **最適化レイアウト**: 縦長PDF文書用に特別設計された横型AI検索パネル
 - **スマートキャッシュ**: 不要な再レンダリングを防ぐ最適化ローディング付きインテリジェントページキャッシュシステム
@@ -66,49 +69,40 @@ sudo yum install rust cargo
 sudo dnf install rust cargo
 ```
 
-### PDFium ライブラリ
 
-#### macOS
-アプリケーションにはPDFiumネイティブライブラリが必要です。macOS用の必要なライブラリ（`libpdfium.dylib`）は`lib/`ディレクトリに含まれています。
+### AI API キー
+AI検索機能を利用するには、以下のいずれかのAPIキーを取得してください：
 
-#### Linux
-Linuxシステムでは、適切なPDFiumライブラリをダウンロードする必要があります：
-```bash
-# x64システム用
-curl -L -o pdfium-linux-x64.tgz \
-  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz" && \
-  tar -xzf pdfium-linux-x64.tgz -C lib --strip-components=1 && \
-  rm pdfium-linux-x64.tgz
-
-# ARM64システム用
-curl -L -o pdfium-linux-arm64.tgz \
-  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-arm64.tgz" && \
-  tar -xzf pdfium-linux-arm64.tgz -C lib --strip-components=1 && \
-  rm pdfium-linux-arm64.tgz
-```
-
-### Gemini API キー
-AI検索機能を利用するには、Google AI Studio から Gemini API キーを取得してください：
+**Gemini API (Google):**
 https://makersuite.google.com/app/apikey
+
+**ChatGPT API (OpenAI):**
+https://platform.openai.com/api-keys
+
+**Claude API (Anthropic):**
+https://console.anthropic.com/
 
 ## インストール・使用方法
 
 ### ソースからビルド
+
+#### macOS
+
 ```bash
 # リポジトリをクローン
 git clone <repository-url>
 cd rust-pdf-viewer
 
-# PDFiumライブラリのセットアップ（macOS）
+# PDFiumライブラリ用のlibディレクトリを作成
 mkdir -p lib
 
-# macOS（Intel/x64）用PDFiumライブラリをダウンロード
+# Intel Mac（x64）用PDFiumライブラリをダウンロード
 curl -L -o pdfium-mac-x64.tgz \
   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-x64.tgz" && \
   tar -xzf pdfium-mac-x64.tgz -C lib --strip-components=1 && \
   rm pdfium-mac-x64.tgz
 
-# Apple Silicon Mac用の場合はこちらを使用:
+# Apple Silicon Mac（ARM64）用の場合はこちらを使用:
 # curl -L -o pdfium-mac-arm64.tgz \
 #   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz" && \
 #   tar -xzf pdfium-mac-arm64.tgz -C lib --strip-components=1 && \
@@ -119,6 +113,42 @@ ls -la lib/libpdfium.dylib
 
 # プロジェクトをビルドして実行
 cargo run
+
+# macOSアプリバンドル（.appファイル）をビルドする場合
+cargo install cargo-bundle
+cargo bundle --release
+
+# アプリバンドルは以下の場所に作成されます:
+# target/release/bundle/osx/PDF Viewer.app
+```
+
+#### Linux
+
+```bash
+# リポジトリをクローン
+git clone <repository-url>
+cd rust-pdf-viewer
+
+# PDFiumライブラリ用のlibディレクトリを作成
+mkdir -p lib
+
+# x64システム用PDFiumライブラリをダウンロード
+curl -L -o pdfium-linux-x64.tgz \
+  "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz" && \
+  tar -xzf pdfium-linux-x64.tgz -C lib --strip-components=1 && \
+  rm pdfium-linux-x64.tgz
+
+# ARM64システム用の場合はこちらを使用:
+# curl -L -o pdfium-linux-arm64.tgz \
+#   "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-arm64.tgz" && \
+#   tar -xzf pdfium-linux-arm64.tgz -C lib --strip-components=1 && \
+#   rm pdfium-linux-arm64.tgz
+
+# ライブラリが正しく配置されているか確認
+ls -la lib/libpdfium.so
+
+# プロジェクトをビルドして実行
+cargo run
 ```
 
 ### アプリケーションの使用
@@ -126,32 +156,69 @@ cargo run
 1. **アプリケーション起動** - 引数は不要
 2. **PDFファイルを開く**:
    - ヘッダーの「📁 PDFを開く」ボタンをクリック
+   - または「📋 最近のファイル」から履歴を選択
    - ファイルダイアログからPDFファイルを選択
 3. **PDFコンテンツの表示**:
    - 全ページが連続スクロール形式で表示
    - 初期ページレンダリング中は上部に読み込み進捗が表示
 4. **AI検索機能**:
-   - 右側パネルにGemini APIキーを入力
+   - AIプロバイダーを選択（Gemini、ChatGPT、Claude）
+   - APIキーを一度入力すると自動保存され、次回起動時に復元されます
    - 用語や概念について質問する検索クエリを入力
    - 「検索」ボタンをクリックしてAI解説を取得
-5. **ファイル管理**:
+   - 検索した用語は自動的に単語帳に保存されます
+5. **単語帳機能**:
+   - 「📚 単語帳を開く」ボタンで保存された検索用語を表示
+   - 各単語をクリックして詳細表示や削除が可能
+6. **ファイル管理**:
    - 「❌ 閉じる」ボタンで現在のPDFを閉じる
    - アプリケーションを再起動せずに異なるファイルを開く
 
 ## アプリケーションレイアウト
 
 - **ヘッダーバー**: ファイル制御ボタンとアプリケーションタイトル
+  - 「📋 最近のファイル」ボタンで履歴を表示
   - 「📁 PDFを開く」ボタンでファイル選択
   - 「❌ 閉じる」ボタンで現在のPDFを閉じる
 - **ステータスバー**: 読み込み進捗とPDF情報（PDF読み込み時）
 - **メインコンテンツエリア**:
   - **左パネル**: 連続スクロール付き縦長文書に最適化されたPDF表示エリア
   - **右パネル**: AI検索インターフェース
-    - APIキー入力（パスワードフィールド）
+    - AIプロバイダー選択（Gemini、ChatGPT、Claude）
+    - APIキー入力（パスワードフィールド、自動保存・復元）
     - 用語解説用検索クエリ入力
     - ローディングインジケーター付き検索ボタン
     - クリーンなテキスト表示の結果エリア
+    - 保存された検索用語を表示する単語帳ボタン
 - **ウェルカム画面**: PDF未読み込み時に使用方法を表示
+
+## データ保存
+
+### 単語帳データ
+アプリケーションは検索した用語とAI生成の定義を単語帳として自動保存し、将来の参照用に保持します。
+
+**保存場所:**
+- **macOS**: `~/.config/pdf-viewer/`
+- **Linux**: `~/.config/pdf-viewer/`  
+- **Windows**: `%USERPROFILE%\.config\pdf-viewer\`
+
+**データファイル:**
+- `flashcards.json` - 保存された検索用語と定義
+- `recent_files.json` - 最近開いたPDFファイル（最大10件）
+- `api_keys.json` - AIプロバイダーの保存されたAPIキー
+
+**データ形式:**
+単語帳はJSON形式で以下の構造で保存されます：
+```json
+[
+  {
+    "id": "1734493200000-machine-lea",
+    "term": "machine learning",
+    "definition": "AI生成の用語説明...",
+    "created_at": "2024-12-18 12:00:00 UTC"
+  }
+]
+```
 
 ## 実装のハイライト
 
@@ -162,7 +229,9 @@ cargo run
 - Web表示用のbase64データURLによるPNGエンコーディング
 
 ### AI検索統合
-- UIをブロックしない非同期Gemini API呼び出し
+- UIをブロックしない非同期AI API呼び出し（Gemini、ChatGPT、Claude対応）
+- APIキーの自動保存と復元機能
+- 検索結果の自動単語帳保存
 - クリーンなテキスト表示のためのMarkdown書式削除
 - リアルタイム検索ステータスインジケーター
 - 包括的なエラーハンドリング
@@ -196,9 +265,10 @@ cargo run
 ## 開発
 
 ### コード構成
-- **PDFレンダリング**: `render_pdf_page_optimized()`関数が最適化付き高解像度ページレンダリングを処理
-- **ファイル管理**: ネイティブファイルダイアログ統合による動的PDF読み込み/閉じる機能
-- **AI検索**: `search_with_gemini()`非同期関数によるAPI統合
+- **PDFレンダリング**: `render_pdf_page_with_text()`関数が最適化付き高解像度ページレンダリングを処理
+- **ファイル管理**: ネイティブファイルダイアログ統合による動的PDF読み込み/閉じる機能と最近のファイル履歴
+- **AI検索**: `search_with_ai()`非同期関数による複数AIプロバイダー統合
+- **データ永続化**: 単語帳、最近のファイル、APIキーのJSON形式自動保存
 - **テキスト処理**: `clean_markdown_text()`による検索結果書式設定
 - **UIコンポーネント**: モダンな状態管理とレスポンシブレイアウトを持つリアクティブDioxusコンポーネント
 
