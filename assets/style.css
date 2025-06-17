@@ -271,17 +271,23 @@ body {
 /* Text selection styles */
 .page-wrapper {
     position: relative;
-    display: inline-block;
+    display: block;
+    width: 100%;
+    max-width: 800px;
+    margin-bottom: 20px;
+    isolation: isolate; /* Create new stacking context */
 }
 
 .text-overlay {
     position: absolute;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
+    right: 0;
+    bottom: 0;
     pointer-events: none;
     border-radius: 4px;
+    z-index: 1;
+    overflow: hidden; /* Prevent text from leaking outside */
 }
 
 .selectable-text {
@@ -297,7 +303,8 @@ body {
     background: transparent;
     border: none;
     outline: none;
-    z-index: 1;
+    z-index: 2;
+    transform: translateZ(0); /* Force hardware acceleration and isolation */
 }
 
 .selectable-text:hover {

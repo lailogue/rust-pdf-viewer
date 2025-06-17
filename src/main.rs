@@ -20,6 +20,7 @@ struct PdfPageData {
     text_elements: Vec<TextElement>,
     page_width: f32,
     page_height: f32,
+    page_index: usize, // 混入チェック用
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -119,6 +120,52 @@ struct ClaudeResponse {
 #[derive(Serialize, Deserialize)]
 struct ClaudeContent {
     text: String,
+}
+
+fn filter_overlapping_text(mut text_elements: Vec<TextElement>) -> Vec<TextElement> {
+    // ページ内のテキスト重なりを防ぐためのフィルタリング
+    let mut filtered_elements: Vec<TextElement> = Vec::new();
+    
+    // Y座標、次にX座標でソートして順序良く処理
+    text_elements.sort_by(|a, b| {
+        match a.bounds.y.partial_cmp(&b.bounds.y) {
+            Some(std::cmp::Ordering::Equal) => a.bounds.x.partial_cmp(&b.bounds.x).unwrap_or(std::cmp::Ordering::Equal),
+            Some(other) => other,
+            None => std::cmp::Ordering::Equal,
+        }
+    });
+    
+    for element in text_elements {
+        let mut should_add = true;
+        
+        // 既に追加された要素との重なりをチェック（より厳格に）
+        for existing in &filtered_elements {
+            let overlap_threshold = 0.7; // 70%以上の重なりで除外
+            let significant_overlap_x = (element.bounds.x < existing.bounds.x + existing.bounds.width * overlap_threshold) &&
+                                       (element.bounds.x + element.bounds.width * overlap_threshold > existing.bounds.x);
+            let significant_overlap_y = (element.bounds.y < existing.bounds.y + existing.bounds.height * overlap_threshold) &&
+                                       (element.bounds.y + element.bounds.height * overlap_threshold > existing.bounds.y);
+            
+            if significant_overlap_x && significant_overlap_y {
+                // 重なりがある場合、より意味のあるテキスト（長さと位置）を保持
+                if element.text.trim().len() <= existing.text.trim().len() {
+                    should_add = false;
+                    break;
+                }
+            }
+        }
+        
+        // 空のテキストや意味のないテキストを除外
+        if element.text.trim().is_empty() || element.text.trim().len() < 1 {
+            should_add = false;
+        }
+        
+        if should_add {
+            filtered_elements.push(element);
+        }
+    }
+    
+    filtered_elements
 }
 
 fn clean_markdown_text(text: &str) -> String {
@@ -238,11 +285,19 @@ async fn search_with_ai(provider: AIProvider, query: String, api_key: String) ->
 }
 
 fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<PdfPageData> {
+    println!("DEBUG: Starting page {} processing", page_index);
     let lib_path = std::env::current_dir().ok()?.join("lib/libpdfium.dylib");
     let bindings = Pdfium::bind_to_library(&lib_path).ok()?;
     let pdfium = Pdfium::new(bindings);
     let document = pdfium.load_pdf_from_file(pdf_path, None).ok()?;
     let page = document.pages().get(page_index as u16).ok()?;
+    
+    // ページが正しく取得されているか確認
+    let actual_page_count = document.pages().len();
+    if page_index >= actual_page_count as usize {
+        println!("ERROR: Page index {} out of bounds (total pages: {})", page_index, actual_page_count);
+        return None;
+    }
     
     // レンダリング設定で適切な処理を行う
     let render_config = PdfRenderConfig::new()
@@ -265,9 +320,10 @@ fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<Pd
     let is_landscape = page_width > page_height;
     let _was_rotated = is_landscape && (bitmap.width() < bitmap.height());
     
-    if page_index == 0 {
+    if page_index < 3 {
         println!("Page {}: PDF {}x{} -> Bitmap {}x{}, Scale: {:.3}x{:.3}", 
             page_index, page_width, page_height, bitmap.width(), bitmap.height(), scale_x, scale_y);
+        println!("  Landscape: {}, Rotation: {:?}", is_landscape, page.rotation());
     }
     
     // Extract text with coordinates using proper pdfium-render API
@@ -358,10 +414,21 @@ fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<Pd
             }
         }
         
-        println!("Page {}: Extracted {} text elements", page_index, text_elements.len());
+        // 重なりを防ぐためのフィルタリング
+        text_elements = filter_overlapping_text(text_elements);
         
-        // 座標の妥当性をチェック（一部のサンプル）
-        if !text_elements.is_empty() && page_index < 3 {
+        println!("Page {}: Extracted {} text elements (after filtering)", page_index, text_elements.len());
+        
+        // デバッグ: ページの最初と最後のテキストを表示（混入チェック）
+        if !text_elements.is_empty() && page_index < 5 {
+            println!("  Page {} first 3 texts: {:?}", page_index, 
+                text_elements.iter().take(3).map(|e| &e.text).collect::<Vec<_>>());
+            if text_elements.len() > 3 {
+                println!("  Page {} last 3 texts: {:?}", page_index,
+                    text_elements.iter().rev().take(3).map(|e| &e.text).collect::<Vec<_>>());
+            }
+            
+            // 座標の妥当性をチェック
             let sample = &text_elements[0];
             println!("  Sample text '{}' at ({:.1}%, {:.1}%) size {:.1}%", 
                 sample.text, 
@@ -390,12 +457,16 @@ fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<Pd
     
     let image_data = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&png_data));
     
-    Some(PdfPageData {
+    let result = PdfPageData {
         image_data,
         text_elements,
         page_width: bitmap.width() as f32,
         page_height: bitmap.height() as f32,
-    })
+        page_index,
+    };
+    
+    println!("DEBUG: Completed page {} processing successfully", page_index);
+    Some(result)
 }
 
 // Keep the old function for backward compatibility during transition
@@ -486,6 +557,11 @@ fn App() -> Element {
                     // 最初の3ページを最優先で読み込み
                     for page_idx in 0..3.min(total_pages) {
                         if let Some(page_data) = render_pdf_page_with_text(&path, page_idx) {
+                            // 混入チェック: ページデータのインデックスが正しいか確認
+                            if page_data.page_index != page_idx {
+                                eprintln!("CRITICAL: Page data contamination detected in priority load! Expected page {}, got page {}", page_idx, page_data.page_index);
+                                continue; // 混入したデータは破棄
+                            }
                             page_cache.write().insert(page_idx, page_data);
                         }
                     }
@@ -507,6 +583,11 @@ fn App() -> Element {
                     let results = futures::future::join_all(batch_futures).await;
                     for result in results {
                         if let Some((page_idx, page_data)) = result {
+                            // 混入チェック: ページデータのインデックスが正しいか確認
+                            if page_data.page_index != page_idx {
+                                eprintln!("CRITICAL: Page data contamination detected! Expected page {}, got page {}", page_idx, page_data.page_index);
+                                continue; // 混入したデータは破棄
+                            }
                             page_cache.write().insert(page_idx, page_data);
                         }
                     }
@@ -527,6 +608,11 @@ fn App() -> Element {
         let mut pages = Vec::new();
         for page_idx in 0..total_pages {
             if let Some(page_data) = page_cache().get(&page_idx) {
+                // 混入チェック: ページインデックスが一致するか確認
+                if page_data.page_index != page_idx {
+                    println!("WARNING: Page data mismatch detected! Expected page {}, got page {}", page_idx, page_data.page_index);
+                    continue; // 混入したページはスキップ
+                }
                 pages.push((page_idx, page_data.clone()));
             }
         }
@@ -657,26 +743,30 @@ fn App() -> Element {
                                         }
                                         div {
                                             class: "page-wrapper",
-                                            style: "position: relative; display: block; width: 100%; max-width: 800px;",
+                                            id: "page-wrapper-{page_idx}",
+                                            style: "position: relative; display: block; width: 100%; max-width: 800px; margin-bottom: 20px; isolation: isolate;",
                                             img {
                                                 src: "{page_data.image_data}",
                                                 alt: "PDF Page {page_idx + 1}",
                                                 class: "pdf-page",
-                                                style: "display: block; width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); background-color: white; margin-bottom: 10px;"
+                                                style: "display: block; width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); background-color: white;"
                                             }
                                             div {
                                                 class: "text-overlay",
-                                                style: "position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; border-radius: 4px;",
+                                                id: "text-overlay-{page_idx}",
+                                                style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; border-radius: 4px; z-index: 1; overflow: hidden;",
                                                 for (text_idx, text_elem) in page_data.text_elements.iter().enumerate() {
                                                     span {
-                                                        key: "{page_idx}-{text_idx}",
+                                                        key: "p{page_idx}t{text_idx}",
                                                         class: "selectable-text",
+                                                        "data-page": "{page_idx}",
+                                                        "data-text-idx": "{text_idx}",
                                                         style: "position: absolute; 
                                                                left: {text_elem.bounds.x / page_data.page_width * 100.0}%; 
                                                                top: {text_elem.bounds.y / page_data.page_height * 100.0}%;
                                                                width: {text_elem.bounds.width / page_data.page_width * 100.0}%;
                                                                height: {text_elem.bounds.height / page_data.page_height * 100.0}%;
-                                                               font-size: {text_elem.font_size / page_data.page_height * 100.0}%;
+                                                               font-size: {(text_elem.font_size / page_data.page_height * 100.0).max(0.8)}%;
                                                                color: transparent;
                                                                pointer-events: auto;
                                                                user-select: text;
@@ -684,7 +774,8 @@ fn App() -> Element {
                                                                font-family: monospace;
                                                                line-height: 1;
                                                                overflow: hidden;
-                                                               white-space: nowrap;",
+                                                               white-space: nowrap;
+                                                               z-index: 2;",
                                                         "{text_elem.text}"
                                                     }
                                                 }
