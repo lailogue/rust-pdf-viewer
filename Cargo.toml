@@ -3,6 +3,17 @@ name = "pdf_reader"
 version = "0.1.0"
 edition = "2021"
 
+[package.metadata.bundle]
+name = "PDF Viewer"
+identifier = "com.rustapp.pdfviewer"
+icon = []
+version = "1.0.0"
+resources = ["lib/libpdfium.dylib"]
+copyright = "Copyright (c) 2024 PDF Viewer"
+category = "Productivity"
+short_description = "Advanced PDF viewer with text selection and AI search"
+long_description = "A modern PDF viewer application built with Rust and Dioxus, featuring text selection, AI-powered search capabilities, and responsive design."
+
 [dependencies]
 pdfium-render = "0.8"
 anyhow = "1.0"
