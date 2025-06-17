@@ -292,7 +292,7 @@ body {
 
 .selectable-text {
     position: absolute;
-    color: transparent;
+    color: transparent !important;
     pointer-events: auto;
     user-select: text;
     cursor: text;
@@ -305,15 +305,32 @@ body {
     outline: none;
     z-index: 2;
     transform: translateZ(0); /* Force hardware acceleration and isolation */
+    -webkit-text-fill-color: transparent; /* WebKit browsers */
+    text-shadow: none; /* Remove any text shadow */
 }
 
 .selectable-text:hover {
     background: rgba(0, 100, 255, 0.1);
+    color: transparent !important;
+}
+
+.selectable-text:focus {
+    color: transparent !important;
+    outline: none;
+}
+
+.selectable-text:active {
+    color: transparent !important;
 }
 
 .selectable-text::selection {
     background: rgba(0, 100, 255, 0.3);
-    color: rgba(0, 0, 0, 0.8);
+    color: transparent;
+}
+
+.selectable-text::-moz-selection {
+    background: rgba(0, 100, 255, 0.3);
+    color: transparent;
 }
 
 /* Debug mode - uncomment to see text boundaries */
