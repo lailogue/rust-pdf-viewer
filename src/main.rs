@@ -632,7 +632,11 @@ fn App() -> Element {
     // 単語帳関連の状態管理
     let mut flashcards = use_signal(|| load_flashcards());
     let mut selected_flashcard = use_signal(|| -> Option<FlashCard> { None });
+    let mut show_flashcard_popup = use_signal(|| false);
     let mut show_flashcard_details = use_signal(|| false);
+    
+    // 単語帳リストをメモ化
+    let flashcard_list = use_memo(move || flashcards());
     
     // PDFファイル情報の取得（PDFが選択されている場合のみ）
     let (total_pages, pdf_info) = use_memo(move || {
@@ -1014,87 +1018,130 @@ fn App() -> Element {
                                 }
                             }
                             
-                            // 単語帳セクション
+                            // 単語帳開くボタン
                             div { 
-                                class: "flashcards-section",
-                                style: "flex-shrink: 0; margin-top: 20px; max-height: 300px; display: flex; flex-direction: column;",
-                                h3 { 
-                                    style: "margin-bottom: 10px; color: #ecf0f1; font-size: 16px;",
-                                    "単語帳 ({flashcards().len()}件)" 
-                                }
-                                
-                                if flashcards().is_empty() {
-                                    div { 
-                                        style: "padding: 12px; background-color: #34495e; border-radius: 4px; color: #bdc3c7; font-size: 13px;",
-                                        "検索して単語を保存すると、ここに表示されます。"
-                                    }
-                                } else {
-                                    div { 
-                                        class: "flashcards-list",
-                                        style: "flex: 1; background-color: #34495e; border-radius: 4px; overflow-y: auto; max-height: 200px;",
-                                        {
-                                            let cards = flashcards();
-                                            rsx! {
-                                                for flashcard in cards.iter() {
-                                                    div { 
-                                                        key: "{flashcard.id}",
-                                                        class: "flashcard-item",
-                                                        style: format!("padding: 8px 12px; border-bottom: 1px solid #2c3e50; cursor: pointer; font-size: 13px; color: #ecf0f1; {} hover:background-color: #3c4f64;", 
-                                                            if let Some(ref selected) = selected_flashcard() {
-                                                                if selected.id == flashcard.id { "background-color: #3c5a7a;" } else { "" }
-                                                            } else { "" }
-                                                        ),
-                                                        onclick: {
-                                                            let card = flashcard.clone();
-                                                            move |_| {
-                                                                selected_flashcard.set(Some(card.clone()));
-                                                                show_flashcard_details.set(true);
-                                                            }
-                                                        },
-                                                        div { 
-                                                            style: "font-weight: bold; margin-bottom: 2px;",
-                                                            "{flashcard.term}"
-                                                        }
-                                                        div { 
-                                                            style: "font-size: 11px; color: #bdc3c7;",
-                                                            "{flashcard.created_at}"
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                // 選択した単語の詳細表示
-                                if show_flashcard_details() {
-                                    if let Some(ref card) = selected_flashcard() {
-                                        div { 
-                                            class: "flashcard-details",
-                                            style: "margin-top: 10px; background-color: #34495e; border-radius: 4px; padding: 12px;",
-                                            div { 
-                                                style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;",
-                                                h4 { 
-                                                    style: "color: #3498db; font-size: 14px; margin: 0;",
-                                                    "{card.term}"
-                                                }
-                                                button { 
-                                                    style: "background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 18px; padding: 0;",
-                                                    onclick: move |_| {
-                                                        show_flashcard_details.set(false);
-                                                        selected_flashcard.set(None);
-                                                    },
-                                                    "×"
-                                                }
-                                            }
-                                            div { 
-                                                style: "color: #ecf0f1; font-size: 13px; line-height: 1.4; white-space: pre-wrap; max-height: 150px; overflow-y: auto;",
-                                                "{card.definition}"
-                                            }
-                                        }
-                                    }
+                                style: "margin-top: 20px;",
+                                button { 
+                                    style: "width: 100%; padding: 10px; background-color: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;",
+                                    onclick: move |_| {
+                                        show_flashcard_popup.set(true);
+                                    },
+                                    "📚 単語帳を開く ({flashcard_list().len()}件)"
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 単語帳ポップアップ
+        if show_flashcard_popup() {
+            div { 
+                class: "popup-overlay",
+                style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;",
+                onclick: move |_| {
+                    show_flashcard_popup.set(false);
+                    show_flashcard_details.set(false);
+                    selected_flashcard.set(None);
+                },
+                div { 
+                    class: "popup-content",
+                    style: "background-color: #2c3e50; border-radius: 8px; padding: 20px; max-width: 600px; max-height: 80vh; overflow-y: auto; position: relative;",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                    },
+                    
+                    // ヘッダー
+                    div { 
+                        style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #34495e; padding-bottom: 10px;",
+                        h2 { 
+                            style: "color: #ecf0f1; margin: 0; font-size: 18px;",
+                            "📚 単語帳 ({flashcard_list().len()}件)"
+                        }
+                        button { 
+                            style: "background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 24px; padding: 0;",
+                            onclick: move |_| {
+                                show_flashcard_popup.set(false);
+                                show_flashcard_details.set(false);
+                                selected_flashcard.set(None);
+                            },
+                            "×"
+                        }
+                    }
+                    
+                    // 単語帳リスト
+                    if flashcard_list().is_empty() {
+                        div { 
+                            style: "text-align: center; padding: 40px; color: #bdc3c7; font-size: 16px;",
+                            "まだ単語が保存されていません。\nAI検索を使って単語を保存してみましょう！"
+                        }
+                    } else {
+                        div { 
+                            class: "flashcards-grid",
+                            style: "display: grid; gap: 12px;",
+                            "単語帳の実装は進行中です..."
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 単語詳細ポップアップ
+        if show_flashcard_details() {
+            if let Some(ref card) = selected_flashcard() {
+                div { 
+                    class: "details-overlay",
+                    style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.8); display: flex; align-items: center; justify-content: center; z-index: 1001;",
+                    onclick: move |_| {
+                        show_flashcard_details.set(false);
+                        selected_flashcard.set(None);
+                    },
+                    div { 
+                        class: "details-content",
+                        style: "background-color: #2c3e50; border-radius: 8px; padding: 24px; max-width: 700px; max-height: 80vh; overflow-y: auto; position: relative; margin: 20px;",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                        },
+                        
+                        // ヘッダー
+                        div { 
+                            style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #34495e; padding-bottom: 12px;",
+                            h3 { 
+                                style: "color: #3498db; margin: 0; font-size: 20px;",
+                                "{card.term}"
+                            }
+                            div { 
+                                style: "display: flex; gap: 10px; align-items: center;",
+                                button { 
+                                    style: "background-color: #3498db; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px;",
+                                    onclick: move |_| {
+                                        show_flashcard_details.set(false);
+                                        selected_flashcard.set(None);
+                                    },
+                                    "戻る"
+                                }
+                                button { 
+                                    style: "background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 24px; padding: 0;",
+                                    onclick: move |_| {
+                                        show_flashcard_details.set(false);
+                                        selected_flashcard.set(None);
+                                    },
+                                    "×"
+                                }
+                            }
+                        }
+                        
+                        // 詳細内容
+                        div { 
+                            style: "color: #ecf0f1; font-size: 15px; line-height: 1.6; white-space: pre-wrap; margin-bottom: 16px;",
+                            "{card.definition}"
+                        }
+                        
+                        // フッター
+                        div { 
+                            style: "border-top: 1px solid #34495e; padding-top: 12px; font-size: 13px; color: #95a5a6;",
+                            "保存日時: {card.created_at}"
                         }
                     }
                 }
