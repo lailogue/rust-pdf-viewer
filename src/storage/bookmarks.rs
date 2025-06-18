@@ -55,3 +55,22 @@ pub fn get_all_reading_bookmarks() -> Vec<ReadingBookmark> {
         Vec::new()
     }
 }
+
+pub fn delete_reading_bookmark(pdf_path: &str) -> Result<()> {
+    let data_dir = ensure_data_dir()?;
+    let bookmarks_path = data_dir.join("bookmarks.json");
+    
+    let mut bookmarks: Vec<ReadingBookmark> = if let Ok(content) = std::fs::read_to_string(&bookmarks_path) {
+        serde_json::from_str(&content).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    
+    // 指定されたパスのブックマークを削除
+    bookmarks.retain(|b| b.pdf_path != pdf_path);
+    
+    let json = serde_json::to_string_pretty(&bookmarks)?;
+    std::fs::write(&bookmarks_path, json)?;
+    
+    Ok(())
+}
