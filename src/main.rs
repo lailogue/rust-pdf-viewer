@@ -59,6 +59,15 @@ struct PageRotations {
     last_modified: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct ReadingBookmark {
+    pdf_path: String,
+    current_page: usize,          // 現在読んでいるページ
+    total_pages: usize,           // PDF総ページ数
+    last_read_time: String,       // 最後に読んだ時間
+    reading_progress: f32,        // 読書進捗率（0.0-1.0）
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct TextElement {
     text: String,
@@ -340,6 +349,97 @@ fn get_rotations_file_path() -> PathBuf {
     path.push("pdf-viewer");
     path.push("page_rotations.json");
     path
+}
+
+// ブックマーク管理用のヘルパー関数
+fn load_reading_bookmark(pdf_path: &PathBuf) -> Option<ReadingBookmark> {
+    let path = get_bookmarks_file_path();
+    if !path.exists() {
+        return None;
+    }
+    
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let bookmarks_list: Vec<ReadingBookmark> = serde_json::from_str(&content).unwrap_or_else(|_| Vec::new());
+            let pdf_path_str = pdf_path.to_string_lossy().to_string();
+            
+            // 該当するPDFファイルのブックマークを探す
+            for bookmark in bookmarks_list {
+                if bookmark.pdf_path == pdf_path_str {
+                    return Some(bookmark);
+                }
+            }
+            None
+        }
+        Err(_) => None
+    }
+}
+
+fn save_reading_bookmark(pdf_path: &PathBuf, current_page: usize, total_pages: usize) -> Result<()> {
+    let path = get_bookmarks_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let pdf_path_str = pdf_path.to_string_lossy().to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    let progress = if total_pages > 0 { (current_page + 1) as f32 / total_pages as f32 } else { 0.0 };
+    
+    // 既存のブックマークを読み込み
+    let mut bookmarks_list: Vec<ReadingBookmark> = if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Vec::new()),
+            Err(_) => Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    
+    // 該当するPDFのブックマークを更新または追加
+    let mut found = false;
+    for bookmark in &mut bookmarks_list {
+        if bookmark.pdf_path == pdf_path_str {
+            bookmark.current_page = current_page;
+            bookmark.total_pages = total_pages;
+            bookmark.last_read_time = now.clone();
+            bookmark.reading_progress = progress;
+            found = true;
+            break;
+        }
+    }
+    
+    if !found {
+        bookmarks_list.push(ReadingBookmark {
+            pdf_path: pdf_path_str,
+            current_page,
+            total_pages,
+            last_read_time: now,
+            reading_progress: progress,
+        });
+    }
+    
+    let content = serde_json::to_string_pretty(&bookmarks_list)?;
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+fn get_bookmarks_file_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("pdf-viewer");
+    path.push("bookmarks.json");
+    path
+}
+
+fn get_all_reading_bookmarks() -> Vec<ReadingBookmark> {
+    let path = get_bookmarks_file_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Vec::new()),
+        Err(_) => Vec::new()
+    }
 }
 
 
@@ -888,6 +988,10 @@ fn App() -> Element {
     // ページ回転関連の状態管理
     let mut page_rotations = use_signal(|| HashMap::<usize, RotationAngle>::new());
     
+    // ブックマーク関連の状態管理
+    let mut current_bookmark = use_signal(|| -> Option<ReadingBookmark> { None });
+    let mut show_bookmarks_popup = use_signal(|| false);
+    
     // 単語帳リストをメモ化
     let flashcard_list = use_memo(move || flashcards());
     let recent_files_list = use_memo(move || recent_files());
@@ -915,6 +1019,10 @@ fn App() -> Element {
                 // 該当PDFの回転状態を読み込み
                 let rotations = load_page_rotations(&path);
                 page_rotations.set(rotations.clone());
+                
+                // 該当PDFのブックマークを読み込み
+                let bookmark = load_reading_bookmark(&path);
+                current_bookmark.set(bookmark);
                 
                 spawn(async move {
                     // 最初の3ページを最優先で読み込み
@@ -997,6 +1105,14 @@ fn App() -> Element {
                     div { 
                         class: "file-controls",
                         style: "display: flex; gap: 10px;",
+                        button {
+                            class: "bookmarks-btn",
+                            style: "padding: 8px 16px; background-color: #f39c12; color: white; border: none; border-radius: 4px; cursor: pointer;",
+                            onclick: move |_| {
+                                show_bookmarks_popup.set(true);
+                            },
+                            "🔖 ブックマーク"
+                        }
                         button {
                             class: "recent-files-btn",
                             style: "padding: 8px 16px; background-color: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer;",
@@ -1167,6 +1283,28 @@ fn App() -> Element {
                                                     }
                                                 },
                                                 "🔄"
+                                            }
+                                            button {
+                                                class: "bookmark-page-btn",
+                                                style: {
+                                                    let is_bookmarked = current_bookmark().map_or(false, |b| b.current_page == *page_idx);
+                                                    let bg_color = if is_bookmarked { "#f39c12" } else { "#95a5a6" };
+                                                    format!("padding: 5px 10px; background-color: {}; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;", bg_color)
+                                                },
+                                                onclick: {
+                                                    let page_idx = *page_idx;
+                                                    move |_| {
+                                                        if let Some(path) = pdf_path() {
+                                                            // ブックマークを保存
+                                                            let _ = save_reading_bookmark(&path, page_idx, total_pages);
+                                                            
+                                                            // ブックマーク状態を更新
+                                                            let bookmark = load_reading_bookmark(&path);
+                                                            current_bookmark.set(bookmark);
+                                                        }
+                                                    }
+                                                },
+                                                "🔖"
                                             }
                                         }
                                         div {
@@ -1544,6 +1682,107 @@ fn App() -> Element {
                         div { 
                             style: "border-top: 1px solid #34495e; padding-top: 12px; font-size: 13px; color: #95a5a6;",
                             "保存日時: {card.created_at}"
+                        }
+                    }
+                }
+            }
+        }
+        
+        // ブックマーク一覧ポップアップ
+        if show_bookmarks_popup() {
+            div { 
+                class: "popup-overlay",
+                style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;",
+                onclick: move |_| {
+                    show_bookmarks_popup.set(false);
+                },
+                div { 
+                    class: "popup-content",
+                    style: "background-color: #2c3e50; border-radius: 8px; padding: 20px; max-width: 600px; max-height: 80vh; overflow-y: auto; position: relative;",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                    },
+                    
+                    // ヘッダー
+                    div { 
+                        style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #34495e; padding-bottom: 10px;",
+                        h2 { 
+                            style: "color: #ecf0f1; margin: 0; font-size: 18px;",
+                            {
+                                let bookmarks = get_all_reading_bookmarks();
+                                format!("🔖 ブックマーク ({}件)", bookmarks.len())
+                            }
+                        }
+                        button { 
+                            style: "background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 24px; padding: 0;",
+                            onclick: move |_| {
+                                show_bookmarks_popup.set(false);
+                            },
+                            "×"
+                        }
+                    }
+                    
+                    // ブックマークリスト
+                    {
+                        let bookmarks = get_all_reading_bookmarks();
+                        if bookmarks.is_empty() {
+                            rsx! {
+                                div { 
+                                    style: "text-align: center; padding: 40px; color: #bdc3c7; font-size: 16px;",
+                                    "まだブックマークがありません。\nPDFを開いてページにブックマークを設定してみましょう！"
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                div { 
+                                    class: "bookmarks-list",
+                                    style: "max-height: 400px; overflow-y: auto;",
+                                    for bookmark in bookmarks.iter() {
+                                        div { 
+                                            key: "{bookmark.pdf_path}",
+                                            class: "bookmark-item",
+                                            style: "background-color: #34495e; border-radius: 6px; padding: 16px; margin-bottom: 12px; cursor: pointer; transition: background-color 0.2s; border: 1px solid #445a6f;",
+                                            onclick: {
+                                                let bookmark_path = bookmark.pdf_path.clone();
+                                                let bookmark_page = bookmark.current_page;
+                                                move |_| {
+                                                    // ブックマークされたPDFを開く
+                                                    let path = PathBuf::from(&bookmark_path);
+                                                    if path.exists() {
+                                                        let _ = add_recent_file(&path);
+                                                        recent_files.set(load_recent_files());
+                                                        pdf_path.set(Some(path));
+                                                        page_cache.write().clear();
+                                                        loaded_pdf_path.set(None);
+                                                        is_loading.set(false);
+                                                        show_bookmarks_popup.set(false);
+                                                        
+                                                        // TODO: ブックマークされたページまでスクロール
+                                                    }
+                                                }
+                                            },
+                                            div { 
+                                                style: "font-weight: bold; margin-bottom: 8px; color: #3498db; font-size: 16px;",
+                                                {
+                                                    PathBuf::from(&bookmark.pdf_path)
+                                                        .file_name()
+                                                        .unwrap_or_default()
+                                                        .to_string_lossy()
+                                                        .to_string()
+                                                }
+                                            }
+                                            div { 
+                                                style: "color: #ecf0f1; font-size: 14px; line-height: 1.4; margin-bottom: 8px;",
+                                                "ページ: {bookmark.current_page + 1} / {bookmark.total_pages} ({(bookmark.reading_progress * 100.0) as u32}%)"
+                                            }
+                                            div { 
+                                                style: "font-size: 12px; color: #95a5a6;",
+                                                "最終閲覧: {bookmark.last_read_time}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
