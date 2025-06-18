@@ -49,7 +49,7 @@ pub fn add_flashcard(term: String, definition: String) -> Result<()> {
             created_at: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         };
         
-        flashcards.push(flashcard);
+        flashcards.insert(0, flashcard); // 新しいものを先頭に追加
     }
     
     save_flashcards(&flashcards)?;

@@ -86,7 +86,7 @@ fn app() -> Element {
     let mut show_markers_popup = use_signal(|| false);
     let mut marker_mode = use_signal(|| false); // マーカー配置モード
     
-    // 単語帳リストをメモ化
+    // 単語帳リストをメモ化（新しいものが上）
     let flashcard_list = use_memo(move || flashcards());
     let recent_files_list = use_memo(move || recent_files());
     
@@ -695,10 +695,11 @@ fn app() -> Element {
                                                     match search_with_ai(provider, search_prompt, api_key_val).await {
                                                         Ok(result) => {
                                                             search_result.set(result.clone());
-                                                            // 単語帳リストを更新
-                                                            flashcards.set(load_flashcards());
                                                             // 検索成功時、単語帳に追加
-                                                            let _ = add_flashcard(query_val, result);
+                                                            if let Ok(_) = add_flashcard(query_val, result) {
+                                                                // 単語帳への追加成功後に即座にリストを更新
+                                                                flashcards.set(load_flashcards());
+                                                            }
                                                         },
                                                         Err(e) => search_result.set(format!("エラー: {}", e)),
                                                     }
