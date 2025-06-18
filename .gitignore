@@ -1,5 +1,8 @@
 target/
 
+# Claude Code documentation
+CLAUDE.md
+
 # PDFium library files
 lib/
 include/
