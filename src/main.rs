@@ -764,6 +764,7 @@ fn app() -> Element {
                 loaded_pdf_path: loaded_pdf_path,
                 is_loading: is_loading,
                 recent_files: recent_files,
+                current_bookmark: current_bookmark,
             }
         }
         

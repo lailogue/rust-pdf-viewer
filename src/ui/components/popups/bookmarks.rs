@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use crate::{get_all_reading_bookmarks, delete_reading_bookmark, add_recent_file, load_recent_files, RecentFile, PdfPageData};
+use crate::{get_all_reading_bookmarks, delete_reading_bookmark, add_recent_file, load_recent_files, RecentFile, PdfPageData, ReadingBookmark};
 
 #[component]
 pub fn bookmarks_popup(
@@ -11,6 +11,7 @@ pub fn bookmarks_popup(
     loaded_pdf_path: Signal<Option<PathBuf>>,
     is_loading: Signal<bool>,
     recent_files: Signal<Vec<RecentFile>>,
+    current_bookmark: Signal<Option<ReadingBookmark>>,
 ) -> Element {
     // ローカル状態でブックマークを管理
     let mut bookmarks = use_signal(|| get_all_reading_bookmarks());
@@ -77,6 +78,16 @@ pub fn bookmarks_popup(
                                                     }
                                                     // ローカル状態を更新
                                                     bookmarks.set(get_all_reading_bookmarks());
+                                                    
+                                                    // 現在開いているPDFがこの削除されたブックマークのものと同じ場合、
+                                                    // current_bookmarkを更新
+                                                    if let Some(current_path) = pdf_path() {
+                                                        let current_path_str = current_path.to_string_lossy().to_string();
+                                                        if current_path_str == bookmark_path {
+                                                            // 削除されたので、現在のブックマーク状態をクリア
+                                                            current_bookmark.set(None);
+                                                        }
+                                                    }
                                                 }
                                             },
                                             "×"
