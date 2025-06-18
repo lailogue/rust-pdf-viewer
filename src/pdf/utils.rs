@@ -58,5 +58,5 @@ pub fn get_pdf_info(pdf_path: &str) -> Result<(usize, String)> {
     let page_count = document.pages().len();
     let title = "Unknown PDF".to_string(); // Metadata API needs investigation
     
-    Ok((page_count as usize, title))
+    Ok((page_count.into(), title))
 }

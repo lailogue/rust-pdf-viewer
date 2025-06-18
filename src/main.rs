@@ -28,12 +28,12 @@ fn main() -> Result<()> {
                 .with_title("PDF Viewer - Dioxus")
                 .with_inner_size(dioxus_desktop::tao::dpi::LogicalSize::new(1200.0, 800.0))
         );
-    dioxus_desktop::launch::launch(App, vec![], config);
+    dioxus_desktop::launch::launch(app, vec![], config);
     
     Ok(())
 }
 
-fn App() -> Element {
+fn app() -> Element {
     // PDFファイルパスの状態管理（初期値はNone）
     let mut pdf_path = use_signal(|| -> Option<PathBuf> {
         let args: Vec<String> = std::env::args().collect();
@@ -139,12 +139,12 @@ fn App() -> Element {
                         .map(|page_idx| {
                             let path_clone = path.clone();
                             let rotation = rotations.get(&page_idx).copied().unwrap_or(RotationAngle::None);
-                            async move {
+                            Box::pin(async move {
                                 match render_pdf_page_with_text(&path_clone.to_string_lossy(), page_idx, rotation) {
                                     Ok(data) => Some((page_idx, data)),
                                     Err(_) => None,
                                 }
-                            }
+                            })
                         })
                         .collect();
                     

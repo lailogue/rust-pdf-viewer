@@ -10,6 +10,7 @@ pub async fn search_with_ai(provider: AIProvider, query: String, api_key: String
     }
 }
 
+#[allow(dead_code)]
 pub fn clean_markdown_text(text: &str) -> String {
     text.lines()
         .map(|line| {

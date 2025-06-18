@@ -6,7 +6,7 @@ pub mod markers;
 pub mod rotations;
 pub mod api_keys;
 
-// pub use config::*; // Currently unused
+// pub  // Currently unused
 pub use flashcards::*;
 pub use bookmarks::*;
 pub use recent_files::*;

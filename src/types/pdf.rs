@@ -18,6 +18,7 @@ impl RotationAngle {
         }
     }
     
+    #[allow(dead_code)]
     pub fn to_degrees(self) -> f32 {
         match self {
             RotationAngle::None => 0.0,

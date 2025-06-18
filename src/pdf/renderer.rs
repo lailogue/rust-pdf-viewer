@@ -11,7 +11,7 @@ pub fn render_pdf_page_with_text(pdf_path: &str, page_index: usize, rotation: Ro
     );
     
     let document = pdfium.load_pdf_from_file(pdf_path, None)?;
-    let page = document.pages().get(page_index.try_into().unwrap())?;
+    let page = document.pages().get(page_index as u16)?;
     
     // ページの元の寸法を取得
     let original_width = page.width().value;
@@ -59,7 +59,7 @@ pub fn render_pdf_page_with_text(pdf_path: &str, page_index: usize, rotation: Ro
         {
             use image::ImageEncoder;
             let encoder = image::codecs::png::PngEncoder::new(&mut png_data);
-            encoder.write_image(&rgba_data, width as u32, height as u32, image::ColorType::Rgba8.into())?;
+            encoder.write_image(&rgba_data, width as u32, height as u32, image::ExtendedColorType::Rgba8)?;
         }
         png_data
     };
