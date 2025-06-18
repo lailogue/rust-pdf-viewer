@@ -6,7 +6,19 @@ pub fn get_pdfium_library_path() -> Result<PathBuf> {
     // アプリケーションバンドル内のパスを最初に試す（.appファイル用）
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(app_dir) = exe_path.parent() {
-            // .app/Contents/MacOS/ から .app/Contents/Frameworks/ へ
+            // .app/Contents/MacOS/ から .app/Contents/Resources/lib/ へ
+            let resources_lib_path = app_dir
+                .parent()
+                .unwrap_or(app_dir)
+                .join("Resources")
+                .join("lib")
+                .join("libpdfium.dylib");
+            
+            if resources_lib_path.exists() {
+                return Ok(resources_lib_path);
+            }
+            
+            // .app/Contents/MacOS/ から .app/Contents/Frameworks/ へ（代替パス）
             let frameworks_path = app_dir
                 .parent()
                 .unwrap_or(app_dir)
@@ -17,7 +29,7 @@ pub fn get_pdfium_library_path() -> Result<PathBuf> {
                 return Ok(frameworks_path);
             }
             
-            // .app/Contents/MacOS/ から .app/Contents/lib/ へ（代替パス）
+            // .app/Contents/MacOS/ から .app/Contents/lib/ へ（旧パス）
             let lib_path = app_dir
                 .parent()
                 .unwrap_or(app_dir)
