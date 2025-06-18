@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     let config = dioxus_desktop::Config::new()
         .with_window(
             dioxus_desktop::tao::window::WindowBuilder::new()
-                .with_title("PDF Viewer - Dioxus")
+                .with_title("PDF Viewer in Rust")
                 .with_inner_size(dioxus_desktop::tao::dpi::LogicalSize::new(1200.0, 800.0))
         );
     dioxus_desktop::launch::launch(app, vec![], config);
@@ -341,7 +341,7 @@ fn app() -> Element {
                             style: "flex: 1; text-align: center; padding: 40px; color: #6c757d; border: 2px dashed #dee2e6; border-radius: 8px; margin: 20px; display: flex; flex-direction: column; justify-content: center;",
                             h2 { "PDFビューアーへようこそ" }
                             p { "上の「📁 PDFを開く」ボタンをクリックしてPDFファイルを選択してください。" }
-                            p { "AI検索機能で調べたい語句の意味を尋ねることができます。" }
+                            p { "LLM Search機能で調べたい語句の意味を尋ねることができます。" }
                         }
                     } else if total_pages == 0 {
                         div { 
@@ -570,7 +570,7 @@ fn app() -> Element {
                             
                             div {
                                 style: "flex-shrink: 0;",
-                                h2 { "AI検索" }
+                                h2 { "LLM Search" }
                                 
                                 div { class: "form-group",
                                     label { "AIモデル:" }

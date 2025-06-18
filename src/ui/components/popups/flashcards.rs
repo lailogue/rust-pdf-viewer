@@ -48,7 +48,7 @@ pub fn flashcard_popup(
                 if flashcard_list().is_empty() {
                     div { 
                         style: "text-align: center; padding: 40px; color: #bdc3c7; font-size: 16px;",
-                        "まだ単語が保存されていません。\nAI検索を使って単語を保存してみましょう！"
+                        "まだ単語が保存されていません。\nLLM Searchを使って単語を保存してみましょう！"
                     }
                 } else {
                     div { 
