@@ -14,6 +14,34 @@ enum AIProvider {
     Claude,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+enum RotationAngle {
+    None = 0,      // 0度
+    Rotate90 = 1,  // 90度（時計回り）
+    Rotate180 = 2, // 180度
+    Rotate270 = 3, // 270度（時計回り）
+}
+
+impl RotationAngle {
+    fn next(self) -> Self {
+        match self {
+            RotationAngle::None => RotationAngle::Rotate90,
+            RotationAngle::Rotate90 => RotationAngle::Rotate180,
+            RotationAngle::Rotate180 => RotationAngle::Rotate270,
+            RotationAngle::Rotate270 => RotationAngle::None,
+        }
+    }
+    
+    fn to_degrees(self) -> f32 {
+        match self {
+            RotationAngle::None => 0.0,
+            RotationAngle::Rotate90 => 90.0,
+            RotationAngle::Rotate180 => 180.0,
+            RotationAngle::Rotate270 => 270.0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct PdfPageData {
     image_data: String,
@@ -21,6 +49,14 @@ struct PdfPageData {
     page_width: f32,
     page_height: f32,
     page_index: usize, // 混入チェック用
+    rotation: RotationAngle, // ページの回転状態
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct PageRotations {
+    pdf_path: String,
+    rotations: HashMap<usize, RotationAngle>, // ページインデックス -> 回転角度
+    last_modified: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -229,6 +265,80 @@ fn get_api_keys_path() -> PathBuf {
     let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
     path.push("pdf-viewer");
     path.push("api_keys.json");
+    path
+}
+
+// ページ回転状態管理用のヘルパー関数
+fn load_page_rotations(pdf_path: &PathBuf) -> HashMap<usize, RotationAngle> {
+    let path = get_rotations_file_path();
+    if !path.exists() {
+        return HashMap::new();
+    }
+    
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let rotations_list: Vec<PageRotations> = serde_json::from_str(&content).unwrap_or_else(|_| Vec::new());
+            let pdf_path_str = pdf_path.to_string_lossy().to_string();
+            
+            // 該当するPDFファイルの回転情報を探す
+            for rotation_data in rotations_list {
+                if rotation_data.pdf_path == pdf_path_str {
+                    return rotation_data.rotations;
+                }
+            }
+            HashMap::new()
+        }
+        Err(_) => HashMap::new()
+    }
+}
+
+fn save_page_rotations(pdf_path: &PathBuf, rotations: &HashMap<usize, RotationAngle>) -> Result<()> {
+    let path = get_rotations_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let pdf_path_str = pdf_path.to_string_lossy().to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    
+    // 既存の回転データを読み込み
+    let mut rotations_list: Vec<PageRotations> = if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Vec::new()),
+            Err(_) => Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    
+    // 該当するPDFの回転データを更新または追加
+    let mut found = false;
+    for rotation_data in &mut rotations_list {
+        if rotation_data.pdf_path == pdf_path_str {
+            rotation_data.rotations = rotations.clone();
+            rotation_data.last_modified = now.clone();
+            found = true;
+            break;
+        }
+    }
+    
+    if !found {
+        rotations_list.push(PageRotations {
+            pdf_path: pdf_path_str,
+            rotations: rotations.clone(),
+            last_modified: now,
+        });
+    }
+    
+    let content = serde_json::to_string_pretty(&rotations_list)?;
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+fn get_rotations_file_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("pdf-viewer");
+    path.push("page_rotations.json");
     path
 }
 
@@ -508,7 +618,7 @@ async fn search_with_ai(provider: AIProvider, query: String, api_key: String) ->
     result
 }
 
-fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<PdfPageData> {
+fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize, rotation: RotationAngle) -> Option<PdfPageData> {
     println!("DEBUG: Starting page {} processing", page_index);
     let lib_path = get_pdfium_library_path();
     let bindings = Pdfium::bind_to_library(&lib_path).ok()?;
@@ -523,11 +633,19 @@ fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<Pd
         return None;
     }
     
-    // レンダリング設定で適切な処理を行う
+    // レンダリング設定で適切な処理を行う（回転を含む）
+    let pdf_rotation = match rotation {
+        RotationAngle::None => PdfPageRenderRotation::None,
+        RotationAngle::Rotate90 => PdfPageRenderRotation::Degrees90,
+        RotationAngle::Rotate180 => PdfPageRenderRotation::Degrees180,
+        RotationAngle::Rotate270 => PdfPageRenderRotation::Degrees270,
+    };
+    
     let render_config = PdfRenderConfig::new()
         .set_target_width(1000)
         .set_maximum_height(1400)
-        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
+        .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true)
+        .rotate(pdf_rotation, true);
 
     let bitmap = page.render_with_config(&render_config).ok()?;
     let width = bitmap.width() as usize;
@@ -687,6 +805,7 @@ fn render_pdf_page_with_text(pdf_path: &PathBuf, page_index: usize) -> Option<Pd
         page_width: bitmap.width() as f32,
         page_height: bitmap.height() as f32,
         page_index,
+        rotation,
     };
     
     println!("DEBUG: Completed page {} processing successfully", page_index);
@@ -766,6 +885,9 @@ fn App() -> Element {
     let mut recent_files = use_signal(|| load_recent_files());
     let mut show_recent_files_popup = use_signal(|| false);
     
+    // ページ回転関連の状態管理
+    let mut page_rotations = use_signal(|| HashMap::<usize, RotationAngle>::new());
+    
     // 単語帳リストをメモ化
     let flashcard_list = use_memo(move || flashcards());
     let recent_files_list = use_memo(move || recent_files());
@@ -790,10 +912,15 @@ fn App() -> Element {
                 page_cache.write().clear(); // 既存のキャッシュをクリア
                 error_message.set(String::new());
                 
+                // 該当PDFの回転状態を読み込み
+                let rotations = load_page_rotations(&path);
+                page_rotations.set(rotations.clone());
+                
                 spawn(async move {
                     // 最初の3ページを最優先で読み込み
                     for page_idx in 0..3.min(total_pages) {
-                        if let Some(page_data) = render_pdf_page_with_text(&path, page_idx) {
+                        let rotation = rotations.get(&page_idx).copied().unwrap_or(RotationAngle::None);
+                        if let Some(page_data) = render_pdf_page_with_text(&path, page_idx, rotation) {
                             // 混入チェック: ページデータのインデックスが正しいか確認
                             if page_data.page_index != page_idx {
                                 eprintln!("CRITICAL: Page data contamination detected in priority load! Expected page {}, got page {}", page_idx, page_data.page_index);
@@ -810,8 +937,9 @@ fn App() -> Element {
                     let batch_futures: Vec<_> = (chunk_start..chunk_end)
                         .map(|page_idx| {
                             let path_clone = path.clone();
+                            let rotation = rotations.get(&page_idx).copied().unwrap_or(RotationAngle::None);
                             async move {
-                                render_pdf_page_with_text(&path_clone, page_idx).map(|data| (page_idx, data))
+                                render_pdf_page_with_text(&path_clone, page_idx, rotation).map(|data| (page_idx, data))
                             }
                         })
                         .collect();
@@ -902,6 +1030,32 @@ fn App() -> Element {
                         }
                         if pdf_path().is_some() {
                             button {
+                                class: "rotate-all-btn",
+                                style: "padding: 8px 16px; background-color: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer;",
+                                onclick: move |_| {
+                                    if let Some(path) = pdf_path() {
+                                        // 全ページを90度回転
+                                        let mut new_rotations = HashMap::new();
+                                        for page_idx in 0..total_pages {
+                                            let current_rotation = page_rotations().get(&page_idx).copied().unwrap_or(RotationAngle::None);
+                                            let new_rotation = current_rotation.next();
+                                            new_rotations.insert(page_idx, new_rotation);
+                                        }
+                                        
+                                        // 回転状態を更新
+                                        page_rotations.set(new_rotations.clone());
+                                        
+                                        // 回転状態を保存
+                                        let _ = save_page_rotations(&path, &new_rotations);
+                                        
+                                        // 全ページを再レンダリング
+                                        page_cache.write().clear();
+                                        loaded_pdf_path.set(None); // 再読み込みを強制
+                                    }
+                                },
+                                "🔄 全て回転"
+                            }
+                            button {
                                 class: "file-close-btn",
                                 style: "padding: 8px 16px; background-color: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer;",
                                 onclick: move |_| {
@@ -978,9 +1132,42 @@ fn App() -> Element {
                                         class: "page-container",
                                         style: "display: flex; flex-direction: column; align-items: center;",
                                         div {
-                                            class: "page-number",
-                                            style: "margin-bottom: 10px; font-weight: bold; color: #2c3e50;",
-                                            "ページ {page_idx + 1}"
+                                            class: "page-header",
+                                            style: "display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 10px;",
+                                            div {
+                                                class: "page-number",
+                                                style: "font-weight: bold; color: #2c3e50;",
+                                                "ページ {page_idx + 1}"
+                                            }
+                                            button {
+                                                class: "rotate-page-btn",
+                                                style: "padding: 5px 10px; background-color: #3498db; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;",
+                                                onclick: {
+                                                    let page_idx = *page_idx;
+                                                    move |_| {
+                                                        if let Some(path) = pdf_path() {
+                                                            // 現在の回転状態を取得
+                                                            let current_rotation = page_rotations().get(&page_idx).copied().unwrap_or(RotationAngle::None);
+                                                            let new_rotation = current_rotation.next();
+                                                            
+                                                            // 回転状態を更新
+                                                            page_rotations.write().insert(page_idx, new_rotation);
+                                                            
+                                                            // 回転状態を保存
+                                                            let _ = save_page_rotations(&path, &page_rotations());
+                                                            
+                                                            // ページを再レンダリング
+                                                            let path_clone = path.clone();
+                                                            spawn(async move {
+                                                                if let Some(page_data) = render_pdf_page_with_text(&path_clone, page_idx, new_rotation) {
+                                                                    page_cache.write().insert(page_idx, page_data);
+                                                                }
+                                                            });
+                                                        }
+                                                    }
+                                                },
+                                                "🔄"
+                                            }
                                         }
                                         div {
                                             class: "page-wrapper",
