@@ -511,7 +511,7 @@ fn app() -> Element {
                                                                overflow: hidden;
                                                                white-space: nowrap;
                                                                z-index: 2;",
-                                                        "{text_elem.text}"
+                                                        "{text_elem.text} "
                                                     }
                                                 }
                                             }
