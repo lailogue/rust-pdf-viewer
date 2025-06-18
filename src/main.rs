@@ -68,6 +68,23 @@ struct ReadingBookmark {
     reading_progress: f32,        // 読書進捗率（0.0-1.0）
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct PositionMarker {
+    id: String,
+    page_index: usize,            // ページ番号（0から始まる）
+    x: f32,                       // ページ内のX座標（相対位置 0.0-1.0）
+    y: f32,                       // ページ内のY座標（相対位置 0.0-1.0）
+    created_at: String,           // 作成日時
+    note: String,                 // オプションのメモ
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+struct PdfMarkers {
+    pdf_path: String,
+    markers: Vec<PositionMarker>,
+    last_modified: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct TextElement {
     text: String,
@@ -440,6 +457,129 @@ fn get_all_reading_bookmarks() -> Vec<ReadingBookmark> {
         Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Vec::new()),
         Err(_) => Vec::new()
     }
+}
+
+impl PositionMarker {
+    fn new(page_index: usize, x: f32, y: f32, note: String) -> Self {
+        let id = format!("{}-{}-{}", 
+            chrono::Utc::now().timestamp_millis(),
+            page_index,
+            (x * 1000.0) as u32
+        );
+        Self {
+            id,
+            page_index,
+            x,
+            y,
+            created_at: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            note,
+        }
+    }
+}
+
+// 位置マーカー管理用のヘルパー関数
+fn load_position_markers(pdf_path: &PathBuf) -> Vec<PositionMarker> {
+    let path = get_markers_file_path();
+    if !path.exists() {
+        return Vec::new();
+    }
+    
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let markers_list: Vec<PdfMarkers> = serde_json::from_str(&content).unwrap_or_else(|_| Vec::new());
+            let pdf_path_str = pdf_path.to_string_lossy().to_string();
+            
+            // 該当するPDFファイルのマーカーを探す
+            for pdf_markers in markers_list {
+                if pdf_markers.pdf_path == pdf_path_str {
+                    return pdf_markers.markers;
+                }
+            }
+            Vec::new()
+        }
+        Err(_) => Vec::new()
+    }
+}
+
+fn save_position_marker(pdf_path: &PathBuf, page_index: usize, x: f32, y: f32, note: String) -> Result<()> {
+    let path = get_markers_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    
+    let pdf_path_str = pdf_path.to_string_lossy().to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    
+    // 既存のマーカーリストを読み込み
+    let mut markers_list: Vec<PdfMarkers> = if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Vec::new()),
+            Err(_) => Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+    
+    // 該当するPDFのマーカーを更新または追加
+    let new_marker = PositionMarker::new(page_index, x, y, note);
+    let mut found = false;
+    
+    for pdf_markers in &mut markers_list {
+        if pdf_markers.pdf_path == pdf_path_str {
+            pdf_markers.markers.push(new_marker.clone());
+            pdf_markers.last_modified = now.clone();
+            found = true;
+            break;
+        }
+    }
+    
+    if !found {
+        markers_list.push(PdfMarkers {
+            pdf_path: pdf_path_str,
+            markers: vec![new_marker],
+            last_modified: now,
+        });
+    }
+    
+    let content = serde_json::to_string_pretty(&markers_list)?;
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+fn delete_position_marker(pdf_path: &PathBuf, marker_id: String) -> Result<()> {
+    let path = get_markers_file_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    
+    let pdf_path_str = pdf_path.to_string_lossy().to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+    
+    // 既存のマーカーリストを読み込み
+    let mut markers_list: Vec<PdfMarkers> = match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| Vec::new()),
+        Err(_) => return Ok(())
+    };
+    
+    // 該当するマーカーを削除
+    for pdf_markers in &mut markers_list {
+        if pdf_markers.pdf_path == pdf_path_str {
+            pdf_markers.markers.retain(|marker| marker.id != marker_id);
+            pdf_markers.last_modified = now;
+            break;
+        }
+    }
+    
+    let content = serde_json::to_string_pretty(&markers_list)?;
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
+fn get_markers_file_path() -> PathBuf {
+    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    path.push("pdf-viewer");
+    path.push("position_markers.json");
+    path
 }
 
 
@@ -992,6 +1132,11 @@ fn App() -> Element {
     let mut current_bookmark = use_signal(|| -> Option<ReadingBookmark> { None });
     let mut show_bookmarks_popup = use_signal(|| false);
     
+    // 位置マーカー関連の状態管理
+    let mut position_markers = use_signal(|| Vec::<PositionMarker>::new());
+    let mut show_markers_popup = use_signal(|| false);
+    let mut marker_mode = use_signal(|| false); // マーカー配置モード
+    
     // 単語帳リストをメモ化
     let flashcard_list = use_memo(move || flashcards());
     let recent_files_list = use_memo(move || recent_files());
@@ -1023,6 +1168,10 @@ fn App() -> Element {
                 // 該当PDFのブックマークを読み込み
                 let bookmark = load_reading_bookmark(&path);
                 current_bookmark.set(bookmark);
+                
+                // 該当PDFの位置マーカーを読み込み
+                let markers = load_position_markers(&path);
+                position_markers.set(markers);
                 
                 spawn(async move {
                     // 最初の3ページを最優先で読み込み
@@ -1112,6 +1261,25 @@ fn App() -> Element {
                                 show_bookmarks_popup.set(true);
                             },
                             "🔖 ブックマーク"
+                        }
+                        button {
+                            class: "marker-mode-btn",
+                            style: {
+                                let bg_color = if marker_mode() { "#e74c3c" } else { "#34495e" };
+                                format!("padding: 8px 16px; background-color: {}; color: white; border: none; border-radius: 4px; cursor: pointer;", bg_color)
+                            },
+                            onclick: move |_| {
+                                marker_mode.set(!marker_mode());
+                            },
+                            {if marker_mode() { "📍 マーカーモード: ON" } else { "📍 マーカーモード" }}
+                        }
+                        button {
+                            class: "markers-list-btn",
+                            style: "padding: 8px 16px; background-color: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer;",
+                            onclick: move |_| {
+                                show_markers_popup.set(true);
+                            },
+                            {format!("📋 マーカー一覧 ({}件)", position_markers().len())}
                         }
                         button {
                             class: "recent-files-btn",
@@ -1301,6 +1469,10 @@ fn App() -> Element {
                                                             // ブックマーク状態を更新
                                                             let bookmark = load_reading_bookmark(&path);
                                                             current_bookmark.set(bookmark);
+                                                            
+                                                            // マーカー状態を更新
+                                                            let markers = load_position_markers(&path);
+                                                            position_markers.set(markers);
                                                         }
                                                     }
                                                 },
@@ -1310,7 +1482,40 @@ fn App() -> Element {
                                         div {
                                             class: "page-wrapper",
                                             id: "page-wrapper-{page_idx}",
-                                            style: "position: relative; display: block; width: 100%; max-width: 800px; margin-bottom: 20px; isolation: isolate;",
+                                            style: {format!("position: relative; display: block; width: 100%; max-width: 800px; margin-bottom: 20px; isolation: isolate; cursor: {};", if marker_mode() { "crosshair" } else { "default" })},
+                                            onclick: {
+                                                let page_idx = *page_idx;
+                                                move |evt| {
+                                                    if marker_mode() {
+                                                        if let Some(path) = pdf_path() {
+                                                            // クリック位置を要素内の相対座標で取得
+                                                            let coords = evt.data().element_coordinates();
+                                                            
+                                                            // page-wrapperの要素サイズを取得してクリック位置を正規化
+                                                            // element_coordinatesは要素内の絶対位置を返す
+                                                            // これを0.0-1.0の範囲に正規化する必要がある
+                                                            // とりあえず固定サイズ（800px幅）で計算
+                                                            let max_width = 800.0; // page-wrapperの最大幅
+                                                            let aspect_ratio = 1.294; // PDF縦横比（1000x1294から）
+                                                            let height = max_width * aspect_ratio;
+                                                            
+                                                            let x = coords.x / max_width;
+                                                            let y = coords.y / height;
+                                                            
+                                                            // 範囲を0.0-1.0にクランプ
+                                                            let x = x.max(0.0).min(1.0);
+                                                            let y = y.max(0.0).min(1.0);
+                                                            
+                                                            // マーカーを保存
+                                                            let _ = save_position_marker(&path, page_idx, x as f32, y as f32, String::new());
+                                                            
+                                                            // マーカー状態を更新
+                                                            let markers = load_position_markers(&path);
+                                                            position_markers.set(markers);
+                                                        }
+                                                    }
+                                                }
+                                            },
                                             img {
                                                 src: "{page_data.image_data}",
                                                 alt: "PDF Page {page_idx + 1}",
@@ -1343,6 +1548,44 @@ fn App() -> Element {
                                                                white-space: nowrap;
                                                                z-index: 2;",
                                                         "{text_elem.text}"
+                                                    }
+                                                }
+                                            }
+                                            div {
+                                                class: "marker-overlay",
+                                                style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 3;",
+                                                for marker in position_markers().iter().filter(|m| m.page_index == *page_idx) {
+                                                    div {
+                                                        key: "marker-{marker.id}",
+                                                        class: "position-marker",
+                                                        style: "position: absolute; 
+                                                               left: {marker.x * 100.0}%; 
+                                                               top: {marker.y * 100.0}%; 
+                                                               width: 12px; 
+                                                               height: 12px; 
+                                                               background-color: #e74c3c; 
+                                                               border: 2px solid white; 
+                                                               border-radius: 50%; 
+                                                               transform: translate(-50%, -50%); 
+                                                               cursor: pointer; 
+                                                               pointer-events: auto; 
+                                                               z-index: 4; 
+                                                               box-shadow: 0 2px 4px rgba(0,0,0,0.3);",
+                                                        onclick: {
+                                                            let marker_id = marker.id.clone();
+                                                            move |evt| {
+                                                                evt.stop_propagation();
+                                                                if let Some(path) = pdf_path() {
+                                                                    // マーカーを削除
+                                                                    let _ = delete_position_marker(&path, marker_id.clone());
+                                                                    
+                                                                    // マーカー状態を更新
+                                                                    let markers = load_position_markers(&path);
+                                                                    position_markers.set(markers);
+                                                                }
+                                                            }
+                                                        },
+                                                        title: "クリックして削除"
                                                     }
                                                 }
                                             }
@@ -1778,6 +2021,176 @@ fn App() -> Element {
                                             div { 
                                                 style: "font-size: 12px; color: #95a5a6;",
                                                 "最終閲覧: {bookmark.last_read_time}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 位置マーカー一覧ポップアップ
+        if show_markers_popup() {
+            div { 
+                class: "popup-overlay",
+                style: "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center; z-index: 1000;",
+                onclick: move |_| {
+                    show_markers_popup.set(false);
+                },
+                div { 
+                    class: "popup-content",
+                    style: "background-color: #2c3e50; border-radius: 8px; padding: 20px; max-width: 600px; max-height: 80vh; overflow-y: auto; position: relative;",
+                    onclick: move |e| {
+                        e.stop_propagation();
+                    },
+                    
+                    // ヘッダー
+                    div { 
+                        style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #34495e; padding-bottom: 10px;",
+                        h2 { 
+                            style: "color: #ecf0f1; margin: 0; font-size: 18px;",
+                            {
+                                let marker_count = position_markers().len();
+                                format!("📍 位置マーカー ({}件)", marker_count)
+                            }
+                        }
+                        button { 
+                            style: "background: none; border: none; color: #e74c3c; cursor: pointer; font-size: 24px; padding: 0;",
+                            onclick: move |_| {
+                                show_markers_popup.set(false);
+                            },
+                            "×"
+                        }
+                    }
+                    
+                    // マーカーリスト
+                    {
+                        let markers = position_markers();
+                        if markers.is_empty() {
+                            rsx! {
+                                div { 
+                                    style: "text-align: center; padding: 40px; color: #bdc3c7; font-size: 16px;",
+                                    "まだ位置マーカーがありません。\nマーカーモードをONにしてPDFページをクリックしてマーカーを設置してみましょう！"
+                                }
+                            }
+                        } else {
+                            rsx! {
+                                div { 
+                                    class: "markers-list",
+                                    style: "max-height: 400px; overflow-y: auto;",
+                                    for marker in markers.iter() {
+                                        div { 
+                                            key: "{marker.id}",
+                                            class: "marker-item",
+                                            style: "background-color: #34495e; border-radius: 6px; padding: 16px; margin-bottom: 12px; border: 1px solid #445a6f; display: flex; justify-content: space-between; align-items: center;",
+                                            div {
+                                                style: "flex: 1; cursor: pointer;",
+                                                onclick: {
+                                                    let page_index = marker.page_index;
+                                                    move |_| {
+                                                        // ポップアップを閉じる
+                                                        show_markers_popup.set(false);
+                                                        
+                                                        // ページにスクロール実行
+                                                        spawn(async move {
+                                                            let page_id = format!("page-wrapper-{}", page_index);
+                                                            let script = format!(
+                                                                r#"
+                                                                const element = document.getElementById('{}');
+                                                                if (element) {{
+                                                                    element.scrollIntoView({{ 
+                                                                        behavior: 'smooth', 
+                                                                        block: 'start' 
+                                                                    }});
+                                                                    console.log('スクロール実行: ページ {}');
+                                                                }} else {{
+                                                                    console.log('要素が見つかりません: {}');
+                                                                }}
+                                                                return true;
+                                                                "#,
+                                                                page_id, page_index + 1, page_id
+                                                            );
+                                                            
+                                                            // 直接evalを実行
+                                                            let _eval = eval(&script);
+                                                        });
+                                                        
+                                                        println!("マーカーのページ {} に移動します", page_index + 1);
+                                                    }
+                                                },
+                                                title: "クリックしてページに移動",
+                                                div { 
+                                                    style: "font-weight: bold; margin-bottom: 8px; color: #f39c12; font-size: 18px;",
+                                                    {format!("📄 ページ {} のマーカー", marker.page_index + 1)}
+                                                }
+                                                div { 
+                                                    style: "color: #ecf0f1; font-size: 14px; line-height: 1.4; margin-bottom: 8px;",
+                                                    {format!("位置: X={:.1}%, Y={:.1}%", marker.x * 100.0, marker.y * 100.0)}
+                                                }
+                                                div { 
+                                                    style: "font-size: 12px; color: #95a5a6;",
+                                                    {format!("作成日時: {}", marker.created_at)}
+                                                }
+                                            }
+                                            div {
+                                                style: "display: flex; gap: 8px;",
+                                                button {
+                                                    style: "background-color: #3498db; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer; font-size: 12px;",
+                                                    onclick: {
+                                                        let page_index = marker.page_index;
+                                                        move |_| {
+                                                            // ポップアップを閉じる
+                                                            show_markers_popup.set(false);
+                                                            
+                                                            // ページにスクロール実行
+                                                            spawn(async move {
+                                                                let page_id = format!("page-wrapper-{}", page_index);
+                                                                let script = format!(
+                                                                    r#"
+                                                                    const element = document.getElementById('{}');
+                                                                    if (element) {{
+                                                                        element.scrollIntoView({{ 
+                                                                            behavior: 'smooth', 
+                                                                            block: 'start' 
+                                                                        }});
+                                                                        console.log('スクロール実行: ページ {}');
+                                                                    }} else {{
+                                                                        console.log('要素が見つかりません: {}');
+                                                                    }}
+                                                                    return true;
+                                                                    "#,
+                                                                    page_id, page_index + 1, page_id
+                                                                );
+                                                                
+                                                                // 直接evalを実行
+                                                                let _eval = eval(&script);
+                                                            });
+                                                            
+                                                            println!("マーカーのページ {} に移動します", page_index + 1);
+                                                        }
+                                                    },
+                                                    {format!("P.{} へ", marker.page_index + 1)}
+                                                }
+                                                button {
+                                                    style: "background-color: #e74c3c; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer; font-size: 12px;",
+                                                onclick: {
+                                                    let marker_id = marker.id.clone();
+                                                    move |_| {
+                                                        if let Some(path) = pdf_path() {
+                                                            // マーカーを削除
+                                                            let _ = delete_position_marker(&path, marker_id.clone());
+                                                            
+                                                            // マーカー状態を更新
+                                                            let markers = load_position_markers(&path);
+                                                            position_markers.set(markers);
+                                                        }
+                                                    }
+                                                },
+                                                "削除"
+                                                }
                                             }
                                         }
                                     }
