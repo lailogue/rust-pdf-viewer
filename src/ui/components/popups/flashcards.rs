@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use crate::{FlashCard, load_flashcards, delete_flashcard};
+use crate::{FlashCard, load_flashcards, delete_flashcard, detailed_search_with_ai, append_detailed_explanation, AIProvider};
 
 #[component]
 pub fn flashcard_popup(
@@ -98,6 +98,13 @@ pub fn flashcard_details_popup(
     show_flashcard_details: Signal<bool>,
     selected_flashcard: Signal<Option<FlashCard>>,
     flashcards: Signal<Vec<FlashCard>>,
+    selected_provider: Signal<AIProvider>,
+    gemini_api_key: String,
+    chatgpt_api_key: String,
+    claude_api_key: String,
+    detail_search_result: Signal<String>,
+    is_detail_searching: Signal<bool>,
+    detail_search_term: Signal<String>,
 ) -> Element {
     if let Some(ref card) = selected_flashcard() {
         rsx! {
@@ -124,6 +131,56 @@ pub fn flashcard_details_popup(
                         }
                         div { 
                             style: "display: flex; gap: 10px; align-items: center;",
+                            button { 
+                                disabled: is_detail_searching(),
+                                style: {
+                                    let bg_color = if is_detail_searching() { "#95a5a6" } else { "#27ae60" };
+                                    format!("background-color: {}; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px;", bg_color)
+                                },
+                                onclick: {
+                                    let card_id = card.id.clone();
+                                    let term = card.term.clone();
+                                    let provider = selected_provider();
+                                    let api_key = match provider {
+                                        AIProvider::Gemini => gemini_api_key.clone(),
+                                        AIProvider::ChatGPT => chatgpt_api_key.clone(),
+                                        AIProvider::Claude => claude_api_key.clone(),
+                                    };
+                                    move |_| {
+                                        if api_key.is_empty() {
+                                            return;
+                                        }
+                                        
+                                        is_detail_searching.set(true);
+                                        
+                                        let card_id_clone = card_id.clone();
+                                        let term_clone = term.clone();
+                                        let api_key_clone = api_key.clone();
+                                        let provider_clone = provider.clone();
+                                        
+                                        spawn(async move {
+                                            match detailed_search_with_ai(provider_clone, term_clone, api_key_clone).await {
+                                                Ok(result) => {
+                                                    // 詳細説明を単語帳に追記
+                                                    if let Ok(_) = append_detailed_explanation(&card_id_clone, result) {
+                                                        // 単語帳リストを更新して即座に反映
+                                                        flashcards.set(load_flashcards());
+                                                        // 現在選択中のカードも更新
+                                                        if let Some(updated_card) = load_flashcards().iter().find(|c| c.id == card_id_clone) {
+                                                            selected_flashcard.set(Some(updated_card.clone()));
+                                                        }
+                                                    }
+                                                }
+                                                Err(_) => {
+                                                    // エラーハンドリング（必要に応じて）
+                                                }
+                                            }
+                                            is_detail_searching.set(false);
+                                        });
+                                    }
+                                },
+                                if is_detail_searching() { "🔍 検索中..." } else { "🔍 さらに詳しく" }
+                            }
                             button { 
                                 style: "background-color: #e74c3c; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; font-size: 12px;",
                                 onclick: {

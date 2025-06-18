@@ -65,6 +65,11 @@ fn app() -> Element {
     let mut show_flashcard_popup = use_signal(|| false);
     let show_flashcard_details = use_signal(|| false);
     
+    // 詳細検索関連の状態管理
+    let detail_search_result = use_signal(|| String::new());
+    let is_detail_searching = use_signal(|| false);
+    let detail_search_term = use_signal(|| String::new());
+    
     // 最近開いたファイル関連の状態管理
     let mut recent_files = use_signal(|| load_recent_files());
     let mut show_recent_files_popup = use_signal(|| false);
@@ -686,7 +691,8 @@ fn app() -> Element {
                                                 search_result.set("検索中...".to_string());
                                                 
                                                 spawn(async move {
-                                                    match search_with_ai(provider, query_val.clone(), api_key_val).await {
+                                                    let search_prompt = format!("{}とはなんですか。簡潔に説明してください", query_val.clone());
+                                                    match search_with_ai(provider, search_prompt, api_key_val).await {
                                                         Ok(result) => {
                                                             search_result.set(result.clone());
                                                             // 単語帳リストを更新
@@ -716,6 +722,27 @@ fn app() -> Element {
                                     class: "result-content",
                                     style: "flex: 1; background-color: #34495e; padding: 12px; border-radius: 4px; overflow-y: auto; font-size: 13px; line-height: 1.4; color: #ecf0f1; white-space: pre-wrap;",
                                     "{search_result}"
+                                }
+                            }
+                            
+                            // 詳細検索結果
+                            if !detail_search_result().is_empty() || is_detail_searching() {
+                                div { 
+                                    class: "detail-search-result",
+                                    style: "flex: 1; display: flex; flex-direction: column; overflow: hidden; margin-top: 20px; border-top: 2px solid #3498db; padding-top: 20px;",
+                                    h3 { 
+                                        style: "flex-shrink: 0; margin-bottom: 10px; color: #3498db; font-size: 16px;",
+                                        "詳細検索結果: {detail_search_term()}" 
+                                    }
+                                    div { 
+                                        class: "detail-result-content",
+                                        style: "flex: 1; background-color: #2c3e50; padding: 12px; border-radius: 4px; overflow-y: auto; font-size: 13px; line-height: 1.4; color: #ecf0f1; white-space: pre-wrap; border: 1px solid #3498db;",
+                                        if is_detail_searching() {
+                                            "詳細情報を検索中..."
+                                        } else {
+                                            "{detail_search_result()}"
+                                        }
+                                    }
                                 }
                             }
                             
@@ -752,6 +779,13 @@ fn app() -> Element {
                 show_flashcard_details: show_flashcard_details,
                 selected_flashcard: selected_flashcard,
                 flashcards: flashcards,
+                selected_provider: selected_provider,
+                gemini_api_key: gemini_api_key(),
+                chatgpt_api_key: chatgpt_api_key(),
+                claude_api_key: claude_api_key(),
+                detail_search_result: detail_search_result,
+                is_detail_searching: is_detail_searching,
+                detail_search_term: detail_search_term,
             }
         }
         

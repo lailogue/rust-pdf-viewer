@@ -62,3 +62,17 @@ pub fn delete_flashcard(card_id: &str) -> Result<()> {
     save_flashcards(&flashcards)?;
     Ok(())
 }
+
+pub fn append_detailed_explanation(card_id: &str, detailed_explanation: String) -> Result<()> {
+    let mut flashcards = load_flashcards();
+    
+    if let Some(card) = flashcards.iter_mut().find(|card| card.id == card_id) {
+        // 既存の説明に詳細説明を追記
+        card.definition = format!("{}\n===========\n{}", card.definition, detailed_explanation);
+        card.created_at = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+        save_flashcards(&flashcards)?;
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("Flashcard with id {} not found", card_id))
+    }
+}

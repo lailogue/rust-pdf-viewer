@@ -10,6 +10,11 @@ pub async fn search_with_ai(provider: AIProvider, query: String, api_key: String
     }
 }
 
+pub async fn detailed_search_with_ai(provider: AIProvider, term: String, api_key: String) -> Result<String> {
+    let detailed_query = format!("{}とはなんですか。詳細に説明してください", term);
+    search_with_ai(provider, detailed_query, api_key).await
+}
+
 #[allow(dead_code)]
 pub fn clean_markdown_text(text: &str) -> String {
     text.lines()
