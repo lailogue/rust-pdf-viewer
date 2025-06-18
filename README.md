@@ -7,8 +7,13 @@ A modern PDF viewer application built with Rust and Dioxus, featuring AI-powered
 - **Dynamic File Selection**: Open and close PDF files through an intuitive file dialog interface
 - **High-Quality PDF Display**: Renders PDF pages at 1000x1400 resolution for balanced quality and performance
 - **Continuous Scroll**: View all PDF pages in a seamless continuous scroll interface
-- **AI-Powered Search**: Integrated Gemini 2.5 Flash API for intelligent content analysis and term explanations
+- **AI-Powered Search**: Integrated multi-provider AI API (Gemini, ChatGPT, Claude) for intelligent content analysis and term explanations
 - **Flashcard System**: Automatic vocabulary flashcard creation from search terms with persistent storage and popup interface
+- **Reading Bookmark System**: Page-level bookmark functionality to track reading progress across sessions
+- **Position Marker System**: Precise in-page position markers with automatic scrolling navigation
+- **PDF Page Rotation**: Individual page rotation with persistent state across sessions
+- **Recent Files History**: Quick access to recently opened PDF files (up to 10 files)
+- **API Key Management**: Automatic saving and restoration of AI provider API keys
 - **Modern UI**: Clean, responsive interface built with Dioxus framework
 - **Optimized Layout**: Specially designed for vertical PDF documents with horizontal AI search panel
 - **Smart Caching**: Intelligent page caching system with optimized loading to prevent unnecessary re-rendering
@@ -158,19 +163,29 @@ cargo run
 3. **View PDF content**:
    - All pages are displayed in a continuous scroll format
    - Loading progress is shown at the top during initial page rendering
-4. **AI Search functionality**:
+   - Individual page rotation controls (90° increments) with persistence
+4. **Reading Progress Management**:
+   - **Bookmarks**: Use "🔖 ブックマーク" to set page-level reading bookmarks
+   - **Position Markers**: Enable "📍 マーカーモード" to place precise location markers within pages
+   - **Automatic Navigation**: Click markers in "📋 マーカー一覧" for automatic page scrolling
+   - **Recent Files**: Access recently opened files via "📋 最近のファイル"
+5. **AI Search functionality**:
    - Select AI provider: Gemini, ChatGPT, or Claude
    - Enter your API key once - it will be automatically saved and restored in future sessions
    - Type your search query to ask about terms or concepts
    - Click "検索" (Search) to get AI-powered explanations
    - Searched terms are automatically saved to your flashcard collection
-5. **File management**:
+6. **File management**:
    - Use "❌ 閉じる" (Close) button to close the current PDF
    - Open different files without restarting the application
 
 ## Application Layout
 
 - **Header Bar**: File control buttons and application title
+  - "🔖 ブックマーク" (Bookmarks) button for reading progress management
+  - "📍 マーカーモード" (Marker Mode) toggle for position marking
+  - "📋 マーカー一覧" (Marker List) for viewing and navigating to saved markers
+  - "📋 最近のファイル" (Recent Files) for quick file access
   - "📁 PDFを開く" (Open PDF) button for file selection
   - "❌ 閉じる" (Close) button to close current PDF
 - **Status Bar**: Loading progress and PDF information (when PDF is loaded)
@@ -199,6 +214,9 @@ The application automatically saves search terms and their AI-generated definiti
 - `flashcards.json` - Saved search terms and definitions
 - `recent_files.json` - Recently opened PDF files (max 10)
 - `api_keys.json` - Saved API keys for AI providers
+- `bookmarks.json` - Reading bookmarks for each PDF file
+- `position_markers.json` - Precise position markers within PDF pages
+- `page_rotations.json` - Individual page rotation states
 
 **Data Format:**
 Flashcards are stored in JSON format with the following structure:
@@ -263,11 +281,14 @@ Flashcards are stored in JSON format with the following structure:
 ## Development
 
 ### Code Organization
-- **PDF Rendering**: `render_pdf_page_optimized()` function handles high-resolution page rendering with optimizations
-- **File Management**: Dynamic PDF loading/closing with native file dialog integration
-- **AI Search**: `search_with_gemini()` async function for API integration
+- **PDF Rendering**: `render_pdf_page_with_text()` function handles high-resolution page rendering with text extraction
+- **File Management**: Dynamic PDF loading/closing with native file dialog integration and recent files history
+- **Reading Progress**: Bookmark and position marker systems with JSON persistence and automatic navigation
+- **Page Rotation**: Individual page rotation controls with state persistence
+- **AI Search**: `search_with_ai()` async function for multi-provider API integration
 - **Text Processing**: `clean_markdown_text()` for formatting search results
 - **UI Components**: Reactive Dioxus components with modern state management and responsive layout
+- **JavaScript Integration**: `eval()` function for automatic page scrolling and DOM manipulation
 
 ### Dependencies
 All dependencies are optimized for the Dioxus ecosystem, removing legacy egui dependencies for a cleaner, more maintainable codebase.
