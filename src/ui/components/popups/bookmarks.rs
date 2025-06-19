@@ -98,9 +98,8 @@ pub fn bookmarks_popup(
                                             style: "cursor: pointer;",
                                             onclick: {
                                                 let bookmark_path = bookmark.pdf_path.clone();
-                                                let _bookmark_page = bookmark.current_page;
                                                 move |_| {
-                                                    // ブックマークされたPDFを開く
+                                                    // ブックマークされたPDFを開く（スクロールなし）
                                                     let path = PathBuf::from(&bookmark_path);
                                                     if path.exists() {
                                                         let file_name = path.file_name()
@@ -114,8 +113,6 @@ pub fn bookmarks_popup(
                                                         loaded_pdf_path.set(None);
                                                         is_loading.set(false);
                                                         show_bookmarks_popup.set(false);
-                                                        
-                                                        // TODO: ブックマークされたページまでスクロール
                                                     }
                                                 }
                                             },
@@ -136,6 +133,45 @@ pub fn bookmarks_popup(
                                             div { 
                                                 style: "font-size: 12px; color: #95a5a6;",
                                                 "最終閲覧: {bookmark.last_read_time}"
+                                            }
+                                        }
+                                        div {
+                                            style: "display: flex; gap: 8px;",
+                                            button {
+                                                style: "background-color: #3498db; color: white; border: none; border-radius: 4px; padding: 8px 12px; cursor: pointer; font-size: 12px;",
+                                                onclick: {
+                                                    let bookmark_page = bookmark.current_page;
+                                                    move |_| {
+                                                        // ポップアップを閉じる
+                                                        show_bookmarks_popup.set(false);
+                                                        
+                                                        // ページにスクロール実行
+                                                        let page_id = format!("page-wrapper-{}", bookmark_page);
+                                                        println!("Scrolling to bookmarked page {} with ID: {}", bookmark_page + 1, page_id);
+                                                        
+                                                        // JavaScriptの実行でスクロールを実行
+                                                        eval(&format!(
+                                                            r#"
+                                                            setTimeout(() => {{
+                                                                const element = document.getElementById('{}');
+                                                                if (element) {{
+                                                                    element.scrollIntoView({{ 
+                                                                        behavior: 'smooth', 
+                                                                        block: 'start' 
+                                                                    }});
+                                                                    console.log('ブックマークスクロール実行: ページ {}');
+                                                                }} else {{
+                                                                    console.log('ブックマークスクロール: 要素が見つかりません: {}');
+                                                                }}
+                                                            }}, 200);
+                                                            "#,
+                                                            page_id, bookmark_page + 1, page_id
+                                                        ));
+                                                        
+                                                        println!("ブックマークのページ {} に移動します", bookmark_page + 1);
+                                                    }
+                                                },
+                                                {format!("P.{} へ", bookmark.current_page + 1)}
                                             }
                                         }
                                     }

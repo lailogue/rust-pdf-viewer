@@ -415,24 +415,31 @@ fn app() -> Element {
                                                     let page_idx = *page_idx;
                                                     move |_| {
                                                         if let Some(path) = pdf_path() {
-                                                            // ブックマークを保存
-                                                            if let Some(path) = pdf_path() {
+                                                            let path_str = path.to_string_lossy().to_string();
+                                                            
+                                                            // 現在のブックマーク状態をチェック
+                                                            let is_currently_bookmarked = current_bookmark()
+                                                                .map_or(false, |b| b.current_page == page_idx);
+                                                            
+                                                            if is_currently_bookmarked {
+                                                                // ブックマークが既に存在する場合は削除
+                                                                let _ = delete_reading_bookmark(&path_str);
+                                                                current_bookmark.set(None);
+                                                            } else {
+                                                                // ブックマークが存在しない場合は新規作成
                                                                 let bookmark = ReadingBookmark {
-                                                                    pdf_path: path.to_string_lossy().to_string(),
+                                                                    pdf_path: path_str.clone(),
                                                                     current_page: page_idx,
                                                                     total_pages,
                                                                     last_read_time: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
                                                                     reading_progress: (page_idx + 1) as f32 / total_pages as f32,
                                                                 };
-                                                                let _ = save_reading_bookmark(bookmark);
+                                                                let _ = save_reading_bookmark(bookmark.clone());
+                                                                current_bookmark.set(Some(bookmark));
                                                             }
                                                             
-                                                            // ブックマーク状態を更新
-                                                            let bookmark = load_reading_bookmark(&path.to_string_lossy());
-                                                            current_bookmark.set(bookmark);
-                                                            
                                                             // マーカー状態を更新
-                                                            let markers = load_position_markers(&path.to_string_lossy());
+                                                            let markers = load_position_markers(&path_str);
                                                             position_markers.set(markers);
                                                         }
                                                     }

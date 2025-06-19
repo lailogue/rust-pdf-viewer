@@ -70,10 +70,13 @@ pub fn markers_popup(
                                                     show_markers_popup.set(false);
                                                     
                                                     // ページにスクロール実行
-                                                    spawn(async move {
-                                                        let page_id = format!("page-wrapper-{}", page_index);
-                                                        let script = format!(
-                                                            r#"
+                                                    let page_id = format!("page-wrapper-{}", page_index);
+                                                    println!("Scrolling to page {} with ID: {}", page_index + 1, page_id);
+                                                    
+                                                    // JavaScriptの実行でスクロールを実行
+                                                    eval(&format!(
+                                                        r#"
+                                                        setTimeout(() => {{
                                                             const element = document.getElementById('{}');
                                                             if (element) {{
                                                                 element.scrollIntoView({{ 
@@ -84,14 +87,10 @@ pub fn markers_popup(
                                                             }} else {{
                                                                 console.log('要素が見つかりません: {}');
                                                             }}
-                                                            return true;
-                                                            "#,
-                                                            page_id, page_index + 1, page_id
-                                                        );
-                                                        
-                                                        // 直接evalを実行
-                                                        let _eval = eval(&script);
-                                                    });
+                                                        }}, 200);
+                                                        "#,
+                                                        page_id, page_index + 1, page_id
+                                                    ));
                                                     
                                                     println!("マーカーのページ {} に移動します", page_index + 1);
                                                 }
@@ -121,10 +120,13 @@ pub fn markers_popup(
                                                         show_markers_popup.set(false);
                                                         
                                                         // ページにスクロール実行
-                                                        spawn(async move {
-                                                            let page_id = format!("page-wrapper-{}", page_index);
-                                                            let script = format!(
-                                                                r#"
+                                                        let page_id = format!("page-wrapper-{}", page_index);
+                                                        println!("Scrolling to page {} with ID: {}", page_index + 1, page_id);
+                                                        
+                                                        // JavaScriptの実行でスクロールを実行
+                                                        eval(&format!(
+                                                            r#"
+                                                            setTimeout(() => {{
                                                                 const element = document.getElementById('{}');
                                                                 if (element) {{
                                                                     element.scrollIntoView({{ 
@@ -135,14 +137,10 @@ pub fn markers_popup(
                                                                 }} else {{
                                                                     console.log('要素が見つかりません: {}');
                                                                 }}
-                                                                return true;
-                                                                "#,
-                                                                page_id, page_index + 1, page_id
-                                                            );
-                                                            
-                                                            // 直接evalを実行
-                                                            let _eval = eval(&script);
-                                                        });
+                                                            }}, 200);
+                                                            "#,
+                                                            page_id, page_index + 1, page_id
+                                                        ));
                                                         
                                                         println!("マーカーのページ {} に移動します", page_index + 1);
                                                     }
