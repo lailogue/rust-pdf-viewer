@@ -202,7 +202,7 @@ fn app() -> Element {
                 div { 
                     class: "header",
                     style: "display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 4px;",
-                    h1 { "PDF Viewer - Dioxus" }
+                    h1 { "PDF Viewer in Rust" }
                     div { 
                         class: "file-controls",
                         style: "display: flex; gap: 10px;",
