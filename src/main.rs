@@ -459,16 +459,19 @@ fn app() -> Element {
                                                             // クリック位置を要素内の相対座標で取得
                                                             let coords = evt.data().element_coordinates();
                                                             
-                                                            // page-wrapperの要素サイズを取得してクリック位置を正規化
-                                                            // element_coordinatesは要素内の絶対位置を返す
-                                                            // これを0.0-1.0の範囲に正規化する必要がある
-                                                            // とりあえず固定サイズ（800px幅）で計算
-                                                            let max_width = 800.0; // page-wrapperの最大幅
-                                                            let aspect_ratio = 1.294; // PDF縦横比（1000x1294から）
-                                                            let height = max_width * aspect_ratio;
+                                                            // 実際のPDFページデータから正確な寸法を取得
+                                                            let (actual_width, actual_height) = if let Some(page_data) = page_cache().get(&page_idx) {
+                                                                (page_data.page_width, page_data.page_height)
+                                                            } else {
+                                                                (1000.0, 1294.0) // デフォルト値
+                                                            };
                                                             
-                                                            let x = coords.x / max_width;
-                                                            let y = coords.y / height;
+                                                            // 表示されている要素の幅は最大800pxで、高さはアスペクト比を保持
+                                                            let display_width = 800.0f64;
+                                                            let display_height = display_width * (actual_height as f64 / actual_width as f64);
+                                                            
+                                                            let x = coords.x / display_width;
+                                                            let y = coords.y / display_height;
                                                             
                                                             // 範囲を0.0-1.0にクランプ
                                                             let x = x.max(0.0).min(1.0);
